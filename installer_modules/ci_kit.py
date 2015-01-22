@@ -156,7 +156,7 @@ class InstallerModule():
 class InstallerService(GObject.GObject):
     __gsignals__ = {
         "EmitTransactionDone": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
-        "EmitTransactionError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING,)),
+        "EmitTransactionError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_BOOLEAN,)),
         "EmitAvailableUpdates": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_BOOLEAN, GObject.TYPE_BOOLEAN,)),
         "EmitStatus": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING,)),
         "EmitRole": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
@@ -164,7 +164,7 @@ class InstallerService(GObject.GObject):
         "EmitIcon": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitTarget": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitPercent": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_FLOAT,)),
-        "EmitDownloadPercentChild": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
+        "EmitDownloadPercentChild":(GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
         "EmitDownloadChildStart": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_BOOLEAN,)),
         "EmitLogError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitLogWarning": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
@@ -244,7 +244,7 @@ class InstallerService(GObject.GObject):
     def release_all(self):
         pass
 
-    def load_cache(self, async, collect_type=None):
+    def load_cache(self, forced=False, async=False, collect_type=None):
         pass
 
     def have_cache(self, collect_type=None):
@@ -307,6 +307,9 @@ class InstallerService(GObject.GObject):
             error = format_error(e.args)
             print("error " + str(error))
         sleep(0.1)
+        loop.quit()
+
+    def get_package_info(self, loop, result, pkg_id, collect_type):
         loop.quit()
 
     def get_local_packages(self, packages, loop, result, collect_type=None):
@@ -624,6 +627,9 @@ class InstallerService(GObject.GObject):
             message = _("Transaction fail.")
             self.EmitTransactionError(title, message)
 
+    def prepare_transaction_commit(self, packages_status, collect_type=None): #new and I don't know how do it
+        pass #posible we need to implemented this resolving dependencies of the packages.
+
     def _confirm_deps(self, dependencies):
         dsize = 0
         info_config = self._get_transaction_summary(dependencies)
@@ -937,7 +943,7 @@ class InstallerService(GObject.GObject):
             elif(statusProp == packagekit.StatusEnum.INSTALL):
                 status = "INSTALLING" 
                 role = status
-                icon = "cinnamon-installer-add"
+                icon = "cinnamon-installer-install"
             elif(statusProp == packagekit.StatusEnum.DEP_RESOLVE):
                 status = "RESOLVING_DEPENDENCIES"
                 role = status
@@ -1009,8 +1015,8 @@ class InstallerService(GObject.GObject):
     def EmitPercent(self, percent):
         self.emit("EmitPercent", percent)
 
-    def EmitDownloadPercentChild(self, id, name, percent, details):
-        self.emit("EmitDownloadPercentChild", id, name, percent, details)
+    def EmitDownloadPercentChild(self, id, img, name, percent, details):
+        self.emit("EmitDownloadPercentChild", id, img, name, percent, details)
 
     def EmitDownloadChildStart(self, restar_all):
         self.emit("EmitDownloadChildStart", restar_all)

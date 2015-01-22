@@ -41,7 +41,9 @@ except Exception:
     print(str(e))
     sys.exit(1)
 
-home = os.path.expanduser("~")
+import SystemTools
+
+HOME_PATH = SystemTools.get_home()
 
 setting_dict = {
     "header"          :   "Header", # Not a setting, just a boldface header text
@@ -145,7 +147,7 @@ class Settings():
         self.multi_instance = multi_instance
         self.uuid = uuid
         try:
-            self.tUser = gettext.translation(self.uuid, home+"/.local/share/locale")
+            self.tUser = gettext.translation(self.uuid, HOME_PATH + "/.local/share/locale")
         except IOError:
             try:
                 self.tUser = gettext.translation(self.uuid, "/usr/share/locale")

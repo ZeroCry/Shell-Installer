@@ -70,7 +70,7 @@ class Module:
         self.first_category_done = False
         self.sidePageHacker = CinnamonSettingsSidePageHacker(self)
         self.installer = InstallerProviders.get_default()
-        self.installer.load_cache()
+        #self.installer.load_cache()#crap
 
     def on_module_selected(self):
         if not self.loaded:

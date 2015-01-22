@@ -42,7 +42,9 @@ except Exception:
     print(str(e))
     sys.exit(1)
 
-home = os.path.expanduser("~")
+import SystemTools
+
+HOME_PATH = SystemTools.get_home()
 
 class XletSetting:
 
@@ -119,11 +121,11 @@ class XletSetting:
     def load_applet_data (self, uuid):
         found = self.get_meta_data_for_applet("/usr/share/cinnamon/%ss/%s" % (self.type, uuid))
         if not found:
-            found = self.get_meta_data_for_applet("%s/.local/share/cinnamon/%ss/%s" % (home, self.type, uuid))
+            found = self.get_meta_data_for_applet("%s/.local/share/cinnamon/%ss/%s" % (HOME_PATH, self.type, uuid))
         if not found:
             print("Could not find %s metadata - are you sure it's installed correctly?" % self.type)
             return False
-        found = self.get_settings_for_applet("%s/.cinnamon/configs/%s" % (home, uuid))
+        found = self.get_settings_for_applet("%s/.cinnamon/configs/%s" % (HOME_PATH, uuid))
         if not found:
             print("Could not find any instance settings data for this %s - are you sure it is loaded, and supports settings?" % self.type)
             return False

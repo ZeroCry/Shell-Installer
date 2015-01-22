@@ -86,7 +86,7 @@ class InstallerService(GObject.GObject):
         "EmitIcon": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitTarget": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitPercent": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_FLOAT,)),
-        "EmitDownloadPercentChild": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
+        "EmitDownloadPercentChild":(GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
         "EmitDownloadChildStart": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_BOOLEAN,)),
         "EmitLogError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitLogWarning": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
@@ -171,9 +171,9 @@ class InstallerService(GObject.GObject):
         pass
 
     def is_service_idle(self):
-        return self.lock_trans.locked()
+        return not self.lock_trans.locked()
 
-    def load_cache(self, async, collect_type=None):
+    def load_cache(self, forced=False, async=False, collect_type=None):
         pass
 
     def have_cache(self, collect_type=None):
@@ -249,6 +249,9 @@ class InstallerService(GObject.GObject):
             e = sys.exc_info()[1]
             print(str(e))
         sleep(0.1)
+        loop.quit()
+
+    def get_package_info(self, loop, result, pkg_id, collect_type):
         loop.quit()
 
     def get_local_packages(self, packages, loop, result, collect_type=None):
@@ -498,7 +501,7 @@ class InstallerService(GObject.GObject):
             string = _("Installing {pkgname}").format(pkgname = tupel[0].name)
             status = string+"..."
             role = "{} ({})...\n".format(string, tupel[0].version)
-            icon = "cinnamon-installer-add"
+            icon = "cinnamon-installer-install"
         elif event == "ALPM_EVENT_ADD_DONE":
             formatted_event = "Installed {pkgname} ({pkgversion})".format(pkgname = tupel[0].name, pkgversion = tupel[0].version)
             common.write_log_file(formatted_event)
@@ -522,7 +525,7 @@ class InstallerService(GObject.GObject):
             string = _("Downgrading {pkgname}").format(pkgname = tupel[1].name)
             status = string+"..."
             role = "{} ({} => {})...\n".format(string, tupel[1].version, tupel[0].version)
-            icon = "cinnamon-installer-add"
+            icon = "cinnamon-installer-install"
         elif event == "ALPM_EVENT_DOWNGRADE_DONE":
             formatted_event = "Downgraded {pkgname} ({oldversion} -> {newversion})".format(pkgname = tupel[1].name, oldversion = tupel[1].version, newversion = tupel[0].version)
             common.write_log_file(formatted_event)
@@ -530,7 +533,7 @@ class InstallerService(GObject.GObject):
             string = _("Reinstalling {pkgname}").format(pkgname = tupel[0].name)
             status = string+"..."
             role = "{} ({})...\n".format(string, tupel[0].version)
-            icon = "cinnamon-installer-add"
+            icon = "cinnamon-installer-install"
         elif event == "ALPM_EVENT_REINSTALL_DONE":
             formatted_event = "Reinstalled {pkgname} ({pkgversion})".format(pkgname = tupel[0].name, pkgversion = tupel[0].version)
             common.write_log_file(formatted_event)
@@ -1257,6 +1260,47 @@ class InstallerService(GObject.GObject):
         error = self._get_pkgs_to_remove(pkgs)
         if error:
             self.EmitTransactionError(_("Transaction fail:"), error)
+        else:
+            if self.to_build:
+                # check if packages in to_build have deps or makedeps which need to be install first
+                error += self.check_to_build()
+            if not error:
+                if len(self.to_add) > 0 or len(self.to_remove) > 0 or len(self.to_load) > 0:
+                    self.EmitTransactionCancellable(True)
+                    trans_flags = {"cascade": cascade, "recurse": recurse}
+                    error += self.init_transaction(**trans_flags)
+                    if not error:
+                        for name in self.to_add:
+                            error += self._add_pkg(name)
+                        for name in self.to_remove:
+                            error += self._remove_pkg(name)
+                        for path in self.to_load:
+                            error += self._load_file(path)
+                        if not error:
+                            error += self._prepare(trans_flags)
+                else:
+                    self.EmitTransactionError(_("Transaction fail:"),_("Nothing to do"))
+                if not error:
+                    dependencies = self._get_dependencies()
+                    print("Dep:" + str(dependencies))
+                    info_conf = self._get_transaction_summary(dependencies)
+                    print("Info:" + str(info_conf["dependencies"]))
+                    self.EmitTransactionConfirmation(info_conf)
+            if error:
+                ##show error?
+                self.release_all()
+                self.EmitTransactionError(_("Transaction fail:"), error)
+
+    def prepare_transaction_commit(self, packages_status, collect_type=None): #new and need to be tested to_update and to_load at less?
+        self.EmitTransactionStart("")
+        self.to_add = set()
+        self.to_update = set()
+        self.to_load = set()
+        self.to_remove = set()
+        error_install = self._get_pkgs_to_install(packages_status["install"])
+        error_remove = self._get_pkgs_to_remove(packages_status["remove"])
+        if error_install or error_remove:
+            self.EmitTransactionError(_("Transaction fail:"), "")
         else:
             if self.to_build:
                 # check if packages in to_build have deps or makedeps which need to be install first
@@ -2076,8 +2120,8 @@ class InstallerService(GObject.GObject):
     def EmitPercent(self, percent):
         self.emit("EmitPercent", percent)
 
-    def EmitDownloadPercentChild(self, id, name, percent, details):
-        self.emit("EmitDownloadPercentChild", id, name, percent, details)
+    def EmitDownloadPercentChild(self, id, img, name, percent, details):
+        self.emit("EmitDownloadPercentChild", id, img, name, percent, details)
 
     def EmitDownloadChildStart(self, restar_all):
         self.emit("EmitDownloadChildStart", restar_all)

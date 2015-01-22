@@ -139,6 +139,8 @@
   </object>
   <object class="GtkListStore" id="downloadListModel">
     <columns>
+      <!-- column-name modelImage -->
+      <column type="gchararray"/>
       <!-- column-name modelPercent -->
       <column type="gint"/>
       <!-- column-name modelName -->
@@ -168,10 +170,9 @@
         <property name="orientation">vertical</property>
         <property name="spacing">5</property>
         <child>
-          <object class="GtkBox" id="titleBox">
+          <object class="GtkBox" id="upperBox">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
-            <property name="spacing">5</property>
             <child>
               <object class="GtkImage" id="appImage">
                 <property name="visible">True</property>
@@ -186,14 +187,50 @@
               </packing>
             </child>
             <child>
-              <object class="GtkLabel" id="appNameLabel">
+              <object class="GtkBox" id="titleBox">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="label" translatable="yes">Cinnamon Installer</property>
-                <attributes>
-                  <attribute name="weight" value="bold"/>
-                  <attribute name="absolute-size" value="20000"/>
-                </attributes>
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkLabel" id="appNameLabel">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <property name="label" translatable="yes">Cinnamon Installer</property>
+                    <attributes>
+                      <attribute name="weight" value="bold"/>
+                      <attribute name="absolute-size" value="20000"/>
+                    </attributes>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">0</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkBox" id="roleBox">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <child>
+                      <object class="GtkLabel" id="roleLabel">
+                        <property name="visible">True</property>
+                        <property name="can_focus">False</property>
+                        <property name="label" translatable="yes">Role</property>
+                        <property name="ellipsize">end</property>
+                      </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">True</property>
+                        <property name="position">0</property>
+                      </packing>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -220,7 +257,7 @@
           <packing>
             <property name="expand">False</property>
             <property name="fill">True</property>
-            <property name="position">1</property>
+            <property name="position">2</property>
           </packing>
         </child>
         <child>
@@ -239,10 +276,10 @@
               </packing>
             </child>
             <child>
-              <object class="GtkLabel" id="roleLabel">
+              <object class="GtkLabel" id="statusLabel">
                 <property name="visible">True</property>
                 <property name="can_focus">False</property>
-                <property name="label" translatable="yes">Role</property>
+                <property name="label" translatable="yes">status</property>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -250,36 +287,11 @@
                 <property name="position">1</property>
               </packing>
             </child>
-            <child>
-              <object class="GtkLabel" id="separatorLabel">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="label" translatable="yes">-</property>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="position">2</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel" id="statusLabel">
-                <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="label" translatable="yes">status</property>
-                <property name="ellipsize">end</property>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="position">3</property>
-              </packing>
-            </child>
           </object>
           <packing>
             <property name="expand">False</property>
             <property name="fill">True</property>
-            <property name="position">2</property>
+            <property name="position">3</property>
           </packing>
         </child>
         <child>
@@ -339,10 +351,21 @@
                                 <property name="headers_visible">False</property>
                                 <property name="expander_column">descriptionColumn</property>
                                 <property name="rules_hint">True</property>
-                                <property name="search_column">5</property>
-                                <property name="tooltip_column">3</property>
+                                <property name="enable_search">False</property>
+                                <property name="tooltip_column">2</property>
                                 <child internal-child="selection">
                                   <object class="GtkTreeSelection" id="installerTreeView-Selection"/>
+                                </child>
+                                <child>
+                                  <object class="GtkTreeViewColumn" id="imageColumn">
+                                    <property name="title" translatable="yes">image</property>
+                                    <child>
+                                      <object class="GtkCellRendererPixbuf" id="imageCell"/>
+                                      <attributes>
+                                        <attribute name="icon-name">0</attribute>
+                                      </attributes>
+                                    </child>
+                                  </object>
                                 </child>
                                 <child>
                                   <object class="GtkTreeViewColumn" id="progressColumn">
@@ -350,7 +373,7 @@
                                     <child>
                                       <object class="GtkCellRendererProgress" id="progressCell"/>
                                       <attributes>
-                                        <attribute name="value">0</attribute>
+                                        <attribute name="value">1</attribute>
                                       </attributes>
                                     </child>
                                   </object>
@@ -361,7 +384,7 @@
                                     <child>
                                       <object class="GtkCellRendererText" id="nameCell"/>
                                       <attributes>
-                                        <attribute name="markup">1</attribute>
+                                        <attribute name="markup">2</attribute>
                                       </attributes>
                                     </child>
                                   </object>
@@ -370,12 +393,13 @@
                                   <object class="GtkTreeViewColumn" id="descriptionColumn">
                                     <property name="sizing">fixed</property>
                                     <property name="title" translatable="yes">Description</property>
+                                    <property name="alignment">1</property>
                                     <child>
                                       <object class="GtkCellRendererText" id="descriptionCell">
                                         <property name="ellipsize">end</property>
                                       </object>
                                       <attributes>
-                                        <attribute name="markup">2</attribute>
+                                        <attribute name="markup">3</attribute>
                                       </attributes>
                                     </child>
                                   </object>
@@ -406,7 +430,7 @@
           <packing>
             <property name="expand">True</property>
             <property name="fill">True</property>
-            <property name="position">3</property>
+            <property name="position">4</property>
           </packing>
         </child>
         <child>
@@ -449,7 +473,7 @@
           <packing>
             <property name="expand">False</property>
             <property name="fill">True</property>
-            <property name="position">4</property>
+            <property name="position">5</property>
           </packing>
         </child>
       </object>

@@ -26,24 +26,21 @@
 from __future__ import print_function
 
 import os, sys, tempfile, time, shutil
+import SystemTools, UtilitiesTools
 
 try:
-    try:
-        import urllib2
-    except:
-        import urllib.request as urllib2
     try:
         import json
     except ImportError:
         import simplejson as json
-    from gi.repository import Gio, GObject
+    from gi.repository import GObject
 except Exception:
     e = sys.exc_info()[1]
     print(str(e))
     #sys.exit(1)
 
+HOME_PATH = SystemTools.get_home()
 
-home = os.path.expanduser("~")
 URL_SPICES_HOME = "http://cinnamon-spices.linuxmint.com"
 URL_SPICES_APPLET_LIST = URL_SPICES_HOME + "/json/applets.json"
 URL_SPICES_THEME_LIST = URL_SPICES_HOME + "/json/themes.json"
@@ -57,16 +54,6 @@ ABORT_USER = 2
 SETTING_TYPE_NONE = 0
 SETTING_TYPE_INTERNAL = 1
 SETTING_TYPE_EXTERNAL = 2
-
-def rec_mkdir(path):
-    if os.path.exists(path):
-        return
-    
-    rec_mkdir(os.path.split(path)[0])
-
-    if os.path.exists(path):
-        return
-    os.mkdir(path)
 
 class SpiceCache(GObject.GObject):
     '''
@@ -102,7 +89,7 @@ class SpiceCache(GObject.GObject):
             return self.cache_object
 
     def is_load(self, collect_type=None):
-        if collect_type:
+        if collect_type:#or is loading?
             return self.cache_is_load[collect_type]
         else:
             for collect_type in self.valid_types:
@@ -110,28 +97,36 @@ class SpiceCache(GObject.GObject):
                     return True
             return False
 
-    def get_package_from_collection(self, collect_type, package_uuid):
-        if (collect_type in self.cache_installed) and (package_uuid in self.cache_installed[collect_type]):
-            return self.cache_installed[collect_type][package_uuid]
-        if (collect_type in self.cache_object) and (package_uuid in self.cache_object[collect_type]):
-            return self.cache_object[collect_type][package_uuid]
-        return self.cache_object[collect_type][package_uuid]
-
     def load(self, callback=None):
         for collect_type in self.cache_object:
             self.load_collection_type(collect_type, callback)
-        print("init cache")
 
-    def load_collection_type(self, collect_type, callback=None):
+    def load_collection_type(self, collect_type=None, callback=None):
+        self.cache_is_load[collect_type] = True
         self._load_cache_online_type(collect_type)
         self._load_extensions(collect_type)
         self._update_data_cache_type(collect_type)
         if callback and callable(callback):
             callback()
-        self.cache_is_load[collect_type] = True
+
+    def get_package_info(self, pkg_id, collect_type):
+        result = {}
+        if pkg_id in self.cache_installed[collect_type]:
+            data = self.cache_installed[collect_type][pkg_id]
+            for key in data:
+                result[key] = self.cache_installed[collect_type][pkg_id][key]
+        if pkg_id in self.cache_object[collect_type]:
+            data = self.cache_object[collect_type][pkg_id]
+            for key in data:
+                if not key in result:
+                    result[key] = self.cache_object[collect_type][pkg_id][key]
+        if len(result.keys()) == 0:
+            return None
+        result["id"] = pkg_id
+        return result
 
     def _load_cache_online_type(self, collect_type):
-        self.cache_object = { "applet": {}, "desklet": {}, "extension": {}, "theme": {} }
+        self.cache_object[collect_type] = {}
         cache_folder = self.get_cache_folder(collect_type)
         cache_file = os.path.join(cache_folder, "index.json")
         if os.path.exists(cache_file):
@@ -141,7 +136,7 @@ class SpiceCache(GObject.GObject):
             except ValueError:
                 pass
                 try:
-                    self.cache_object[collect_type] = { "applet": {}, "desklet": {}, "extension": {}, "theme": {} }
+                    self.cache_object[collect_type] = { }
                     os.remove(cache_file)
                 except:
                     pass
@@ -150,7 +145,7 @@ class SpiceCache(GObject.GObject):
                 #self.errorMessage(_("Something went wrong with the spices download.  Please try refreshing the list again."), str(e))
         else:
             print("The online cache for %s is empty" % (collect_type))
-            self.cache_object[collect_type] = { "applet": {}, "desklet": {}, "extension": {}, "theme": {} }
+            self.cache_object[collect_type] = { }
 
     def _update_data_cache_type(self, collect_type):
         cache_data = self.cache_object[collect_type]
@@ -189,8 +184,6 @@ class SpiceCache(GObject.GObject):
             if collect_type in self.cache_installed:
                 if remplace_uuid in self.cache_installed[collect_type]:
                     installed_ext = self.cache_installed[collect_type][remplace_uuid]
-                    if installed_ext["uuid"] == "cinnamon":
-                        print("Seraaaa> " + str(installed_ext["uuid"]))
                     install_edited = installed_ext["install-edited"]
                     if "last-edited" in extensionData:
                         installed_ext["last-edited"] = extensionData["last-edited"]
@@ -256,13 +249,13 @@ class SpiceCache(GObject.GObject):
        return instance
 
     def _load_extensions(self, collect_type):
-        self.cache_installed = { "applet": {}, "desklet": {}, "extension": {}, "theme": {} }
+        self.cache_installed[collect_type] = {}
         if collect_type == "theme":
-            self._load_extensions_in(collect_type, ("%s/.themes") % (home))
+            self._load_extensions_in(collect_type, ("%s/.themes") % (HOME_PATH))
             self._load_extensions_in(collect_type, "/usr/share", True)
             self._load_extensions_in(collect_type, "/usr/share/themes")
         else:
-            self._load_extensions_in(collect_type, ("%s/.local/share/cinnamon/%ss") % (home, collect_type))
+            self._load_extensions_in(collect_type, ("%s/.local/share/cinnamon/%ss") % (HOME_PATH, collect_type))
             self._load_extensions_in(collect_type, ("/usr/share/cinnamon/%ss") % (collect_type))
 
     def _load_extensions_in(self, collect_type, directory, stock_theme = False):
@@ -275,50 +268,55 @@ class SpiceCache(GObject.GObject):
                 themes.sort()
                 for theme in themes:
                     if theme in self.cache_installed[collect_type]:
-                        continue
+                        continue  
+                    if stock_theme:
+                        theme_name = "Cinnamon"
+                        theme_uuid = "STOCK"
+                        install_folder = os.path.join(directory, theme, "theme")
+                    else:
+                        theme_name = theme
+                        theme_uuid = theme
+                        install_folder = os.path.join(directory, theme, "cinnamon")
+                    index_id = str.lower(theme_name)
                     try:
-                        if stock_theme:
-                            install_folder = os.path.join(directory, theme, "theme")
-                        else:
-                            install_folder = os.path.join(directory, theme, "cinnamon")
                         if os.path.exists(install_folder) and os.path.isdir(install_folder):
-                            theme_uuid = theme
+                            self.cache_installed[collect_type][index_id] = {}
                             metadata = os.path.join(install_folder, "metadata.json")
-                            last_edited = -1
-                            spices_show = ""
                             if os.path.exists(metadata):
                                 json_data=open(metadata).read()
-                                data = json.loads(json_data)  
-                                last_edited = self._fix_last_edited(data)
+                                data = json.loads(json_data)
+                                self.cache_installed[collect_type][index_id] = data
+                            theme_json = os.path.join(install_folder, "theme.json")
+                            if os.path.exists(theme_json):
+                                json_data=open(theme_json).read()
+                                data = json.loads(json_data)
+                                if len(data.keys()) > 0:
+                                    self._merge_json_data(self.cache_installed[collect_type][index_id], data[data.keys()[0]])
+
+                            last_edited = -1
+                            spices_show = ""
+                            last_edited = self._fix_last_edited(self.cache_installed[collect_type][index_id])
+                            if os.path.exists("%s/cinnamon.css" % install_folder):
                                 if last_edited == -1:
-                                    last_edited = os.path.getmtime("%s/metadata.json" % install_folder)
-                                try: theme_uuid = str(data["uuid"])
-                                except KeyError: theme_uuid = theme
-                                except ValueError: theme_uuid = theme
-                                try: spices_show = data["spices-id"]
-                                except KeyError: spices_show = None
-                                except ValueError: spices_show = None
-                                if spices_show:
-                                    spices_show = "'%s/%ss/view/%s'" % (URL_SPICES_HOME, collect_type, spices_show)
-
-                            if last_edited == -1:
-                                if os.path.exists("%s/cinnamon.css" % install_folder):
                                     last_edited = os.path.getmtime("%s/cinnamon.css" % install_folder)
-
-                            if stock_theme:
-                                theme_name = "Cinnamon"
-                                theme_uuid = "STOCK"
                             else:
-                                theme_name = theme
-                            index_id = str.lower(theme_name);
+                                raise Exception(_("Could not be locallized the file cinnamon.css."))
+
+                            try: theme_uuid = str(self.cache_installed[collect_type][index_id]["uuid"])
+                            except KeyError: theme_uuid = theme
+                            except ValueError: theme_uuid = theme
+                            try: spices_show = self.cache_installed[collect_type][index_id]["spices-id"]
+                            except KeyError: spices_show = None
+                            except ValueError: spices_show = None
+                            if spices_show:
+                                spices_show = "'%s/%ss/view/%s'" % (URL_SPICES_HOME, collect_type, spices_show)
                             theme_description = ""
                             icon = ""
                             if os.path.exists(os.path.join(install_folder, "thumbnail.png")):
                                 icon = os.path.join(install_folder, "thumbnail.png")
                             else:
-                                icon = "/usr/lib/cinnamon-settings/data/icons/themes.svg"
+                                icon = "cs-themes"
 
-                            self.cache_installed[collect_type][index_id] = {}
                             self.cache_installed[collect_type][index_id]["uuid"] = theme_uuid
                             self.cache_installed[collect_type][index_id]["description"] = theme_name
                             self.cache_installed[collect_type][index_id]["max-instances"] = 1
@@ -337,6 +335,8 @@ class SpiceCache(GObject.GObject):
                             self.cache_installed[collect_type][index_id]["score"] = 0
                     except Exception:
                         e = sys.exc_info()[1]
+                        if index_id in self.cache_installed[collect_type]:
+                            del self.cache_installed[collect_type][index_id]
                         print("Failed to load extension %s: %s" % (theme, str(e)))
         else: # Applet, Desklet, Extension handling
             if os.path.exists(directory) and os.path.isdir(directory):
@@ -350,8 +350,9 @@ class SpiceCache(GObject.GObject):
                         if os.path.exists("%s/metadata.json" % install_folder):
                             json_data=open("%s/metadata.json" % install_folder).read()
                             setting_type = 0
-                            data = json.loads(json_data)  
+                            data = json.loads(json_data)
                             extension_uuid = data["uuid"]
+                            self.cache_installed[collect_type][extension_uuid] = data
                             extension_name = data["name"]                                        
                             extension_description = data["description"]                          
                             try: max_instances = int(data["max-instances"])
@@ -395,7 +396,6 @@ class SpiceCache(GObject.GObject):
                             if extension_icon is None:
                                 extension_icon = "cs-%ss" % (collect_type)
 
-                            self.cache_installed[collect_type][extension_uuid] = self._get_empty_installed()
                             self.cache_installed[collect_type][extension_uuid]["uuid"] = extension_uuid
                             self.cache_installed[collect_type][extension_uuid]["description"] = extension_description
                             self.cache_installed[collect_type][extension_uuid]["max-instances"] = max_instances
@@ -415,26 +415,11 @@ class SpiceCache(GObject.GObject):
                         e = sys.exc_info()[1]
                         print("Failed to load extension of %s: %s" % (extension, str(e)))
 
-    def refresh_cache_type(self, user_param, reporthook=None):
-        #self.progressbar.set_fraction(0)
-        #self.progress_bar_pulse()
-        cache_folder = self.get_cache_folder(user_param[0])
-        cache_file = os.path.join(cache_folder, "index.json")
-        fd, filename = tempfile.mkstemp()
-        f = os.fdopen(fd, "wb")
-        try:
-            self._download_file(self.get_index_url(user_param[0]), f, filename, reporthook, user_param)
-        except Exception:
-            e = sys.exc_info()[1]
-            print(str(e))
-        if os.path.isfile(filename):
-            if self.abort_download > ABORT_NONE:
-                os.remove(filename)
-            else:
-                shutil.move(filename, cache_file)
-                self._load_cache_online_type(user_param[0])
-                self._update_data_cache_type(user_param[0])
-        #print("Loaded index, now we know about %d spices." % len(self.index_cache))
+    def _merge_json_data(self, cache_extensions, data):
+        if data:
+            for key in data:
+                cache_extensions[key] = data[key]
+                print(key + " " + str(data[key]))
 
     def load_assets_type(self, collect_type, reporthook=None):
         used_thumbs = []
@@ -474,121 +459,18 @@ class SpiceCache(GObject.GObject):
         for uuid in uuids:
             icon_path = index_cache[uuid]["icon"]
             if not os.path.isfile(icon_path):
-                download_url = self.get_assets_url(collect_type, index_cache[uuid])
+                download_url = self.get_assets_url(collect_type, uuid)
                 need_refresh[download_url] = index_cache[uuid]
         return need_refresh
-
-    def refresh_asset(self, pkg, download_url, reporthook=None):
-        if self.abort_download > ABORT_NONE:
-            return False
-        valid = True
-        try:
-            urllib2.urlopen(download_url).getcode()
-            fd, filename = tempfile.mkstemp()
-            f = os.fdopen(fd, "wb")
-            self._download_file(download_url, f, filename, reporthook, pkg)
-            if os.path.isfile(filename):
-                if self.abort_download > ABORT_NONE:
-                    os.remove(filename)
-                else:
-                    shutil.move(filename, pkg[0]["icon"])
-                   #self._load_cache_online_type(collect_type)
-                   #self._update_data_cache_type(collect_type)
-        except Exception:
-            valid = False
-            e = sys.exc_info()[1]
-            print(str(e))
-        if not valid:
-            #report an error?
-            pass
-        return valid
-
-    def download_packages(self, pkg, f, filename, reporthook=None):
-        try:
-            url = URL_SPICES_HOME + pkg["file"];
-            self._download_file(url, f, filename, reporthook, pkg)
-        except Exception:
-            e = sys.exc_info()[1]
-            print(str(e))
-
-    def _download_file(self, url, outfd, outfile, reporthook, user_param=None):
-        self.abort_download = ABORT_NONE
-        try:
-            self.url_retrieve(url, outfd, reporthook, user_param)
-        except KeyboardInterrupt:
-            try:
-                os.remove(outfile)
-            except OSError:
-                pass
-            if self.abort_download == ABORT_ERROR:
-                print(_("An error occurred while trying to access the server.  Please try again in a little while."), self.error)
-            raise Exception(_("Download aborted."))
-
-        return outfile
-
-    def _reporthook(self, count, blockSize, totalSize, user_param):
-        pass
-        '''
-        if self.download_total_files > 1:
-            fraction = (float(self.download_current_file) / float(self.download_total_files));
-            self.progressbar.set_text("%s - %d / %d files" % (str(int(fraction*100)) + "%", self.download_current_file, self.download_total_files))
-        else:
-            fraction = count * blockSize / float((totalSize / blockSize + 1) *
-                (blockSize))
-            self.progressbar.set_text(str(int(fraction * 100)) + "%")
-
-        if fraction > 0:
-            self.progressbar.set_fraction(fraction)
-        else:
-            self.progress_bar_pulse()
-
-       '''
-
-    def url_retrieve(self, url, f, reporthook, user_param):        
-        #Like the one in urllib. Unlike urllib.retrieve url_retrieve
-        #can be interrupted. KeyboardInterrupt exception is rasied when
-        #interrupted.        
-        count = 0
-        block_size = 1024 * 8
-        try:
-            urlobj = urllib2.urlopen(url)
-        except Exception:
-            f.close()
-            e = sys.exc_info()[1]
-            self.abort_download = ABORT_ERROR
-            self.error = str(e)
-            raise KeyboardInterrupt
-        total_size = int(urlobj.info()["content-length"])
-
-        try:
-            while self.abort_download == ABORT_NONE:
-                data = urlobj.read(block_size)
-                count += 1
-                if not data:
-                    break
-                f.write(data)
-                if (reporthook) and (callable(reporthook)):
-                    reporthook(count, block_size, total_size, user_param)
-                else:
-                    print(str(reporthook))
-        except KeyboardInterrupt:
-            f.close()
-            self.abort_download = ABORT_USER
-
-        if self.abort_download > ABORT_NONE:
-            raise KeyboardInterrupt
-
-        del urlobj
-        f.close()
 
     def sanitize_thumb(self, basename):
         return basename.replace("jpg", "png").replace("JPG", "png").replace("PNG", "png")
 
     def get_cache_folder(self, collect_type):
-        cache_folder = "%s/.cinnamon/spices.cache/%s/" % (home, collect_type)
+        cache_folder = "%s/.cinnamon/spices.cache/%s/" % (HOME_PATH, collect_type)
 
         if not os.path.exists(cache_folder):
-            rec_mkdir(cache_folder)
+            SystemTools.rec_mkdir(cache_folder)
         return cache_folder
 
     def get_cache_file(self, collect_type):
@@ -596,9 +478,9 @@ class SpiceCache(GObject.GObject):
 
     def get_install_folder(self, collect_type):
         if collect_type in ["applet","desklet","extension"]:
-            install_folder = "%s/.local/share/cinnamon/%ss/" % (home, collect_type)
+            install_folder = "%s/.local/share/cinnamon/%ss/" % (HOME_PATH, collect_type)
         elif collect_type == "theme":
-            install_folder = "%s/.themes/" % (home)
+            install_folder = "%s/.themes/" % (HOME_PATH)
         return install_folder
 
     def get_index_url(self, collect_type):
@@ -613,12 +495,54 @@ class SpiceCache(GObject.GObject):
         else:
             return None
 
-    def get_assets_url(self, collect_type, package):
-        if collect_type == "theme":
-            download_url = URL_SPICES_HOME + "/uploads/themes/thumbs/" + package["icon-filename"]
-        else:
-            download_url = URL_SPICES_HOME + ("/uploads/%ss/%s" % (collect_type, package["icon-filename"]))
+    def get_assets_url(self, collect_type, uuid):
+        download_url = ""
+        if uuid in self.cache_object[collect_type]:
+            package = self.cache_object[collect_type][uuid]
+            if collect_type == "theme":
+                download_url = URL_SPICES_HOME + "/uploads/themes/thumbs/" + package["icon-filename"]
+            else:
+                download_url = URL_SPICES_HOME + ("/uploads/%ss/%s" % (collect_type, package["icon-filename"]))
         return download_url
+
+    def get_package_url(self, collect_type, uuid):
+        download_url = ""
+        if uuid in self.cache_object[collect_type]:
+            download_url = URL_SPICES_HOME + self.cache_object[collect_type][uuid]["file"]
+        return download_url
+
+    def _scrubConfigDirs(self, enabled_list): #We need to do that on some places. Maybe as idle on some this is return?
+        active_list = {}
+        for enabled in enabled_list:
+            if self.collection_type == "applet":
+                panel, align, order, uuid, id = enabled.split(":")
+            elif self.collection_type == "desklet":
+                uuid, id, x, y = enabled.split(":")
+            else:
+                uuid = enabled
+                id = 0
+            if uuid not in active_list:
+                id_list = []
+                active_list[uuid] = id_list
+                active_list[uuid].append(id)
+            else:
+                active_list[uuid].append(id)
+
+        for uuid in active_list.keys():
+            if (os.path.exists(os.path.join(SETTINGS_PATH, uuid))):
+                dir_list = os.listdir(os.path.join(SETTINGS_PATH, uuid))
+                for id in active_list[uuid]:
+                    fn = str(id) + ".json"
+                    if fn in dir_list:
+                        dir_list.remove(fn)
+                fn = str(uuid) + ".json"
+                if fn in dir_list:
+                    dir_list.remove(fn)
+                for jetsam in dir_list:
+                    try:
+                        os.remove(os.path.join(SETTINGS_PATH, uuid, jetsam))
+                    except:
+                        pass
 
     def from_setting_string(self, collect_type, string):
         if collect_type == "theme":

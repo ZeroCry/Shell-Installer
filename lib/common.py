@@ -58,26 +58,26 @@ def format_pkg_name(name):
             name = name[0:index]
     return name
 
-pid_file = "/tmp/installer.pid"
-lock_file = os.path.join(config.pacman_conf.options["DBPath"], "db.lck")
+PID_FILE = "/tmp/installer.pid"
+LOCK_FILE = os.path.join(config.pacman_conf.options["DBPath"], "db.lck")
 
 def lock_file_exists():
-    return os.path.isfile(lock_file)
+    return os.path.isfile(LOCK_FILE)
 
 def pid_file_exists():
-    return os.path.isfile(pid_file)
+    return os.path.isfile(PID_FILE)
 
 def write_pid_file():
-    with open(pid_file, "w") as _file:
+    with open(PID_FILE, "w") as _file:
         _file.write(str(os.getpid()))
 
 def rm_pid_file():
-    if os.path.isfile(pid_file):
-        os.remove(pid_file)
+    if os.path.isfile(PID_FILE):
+        os.remove(PID_FILE)
 
 def rm_lock_file():
-    if os.path.isfile(lock_file):
-        os.remove(lock_file)
+    if os.path.isfile(LOCK_FILE):
+        os.remove(LOCK_FILE)
 
 import time
 

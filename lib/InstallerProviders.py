@@ -31,7 +31,6 @@ from gi.repository import GObject
 
 try:
     import ApplicationGUI
-    import SpiceHarvesterCinnamon
 except Exception:
     e = sys.exc_info()[1]
     print(str(e))
@@ -40,10 +39,6 @@ except Exception:
 ABS_PATH = os.path.abspath(__file__)
 DIR_PATH = os.path.dirname(os.path.dirname(ABS_PATH))
 MODULE_PATH = os.path.join(DIR_PATH, "installer_modules/")
-
-ABORT_NONE = 0
-ABORT_ERROR = 1
-ABORT_USER = 2
 
 class Modules_Importer():
     def __init__(self):
@@ -86,6 +81,7 @@ class Transaction(object):
         self.modules = self.importer.get_modules()
         self.register_collections(supported_collections)
         self.signals = []
+        print("Was create a transaction")
 
     def register_collections(self, supported_collections):
         for collect_type in supported_collections:
@@ -95,27 +91,28 @@ class Transaction(object):
         return True
 
     def register_collection(self, collect_type):
-        if len(self.modules) == 0:
-            self.importerError = self.importer.get_importer_errors()
-            return False
-        is_satisfy = False
-        for module in self.modules: 
-            if module in self.initialized_modules:
-                mod = self.initialized_modules[module]
-            else:
-                mod = module.InstallerModule()
-                self.initialized_modules[module] = mod
-            if (mod.priority_for_collection(collect_type) > 0):
-                is_satisfy = True
-                if collect_type in self.services:
-                    if mod.get_service() not in self.services[collect_type]:
-                        self.services[collect_type].append(mod.get_service())
+        if not collect_type in self.services:
+            if len(self.modules) == 0:
+                self.importerError = self.importer.get_importer_errors()
+                return False
+            is_satisfy = False
+            for module in self.modules: 
+                if module in self.initialized_modules:
+                    mod = self.initialized_modules[module]
                 else:
-                    self.services[collect_type] = []
-                    self.services[collect_type].append(mod.get_service())
-        if not is_satisfy:
-            self.importerError = self.importer.get_importer_errors()
-            return False
+                    mod = module.InstallerModule()
+                    self.initialized_modules[module] = mod
+                if (mod.priority_for_collection(collect_type) > 0):
+                    is_satisfy = True
+                    if collect_type in self.services:
+                        if mod.get_service() not in self.services[collect_type]:
+                            self.services[collect_type].append(mod.get_service())
+                    else:
+                        self.services[collect_type] = []
+                        self.services[collect_type].append(mod.get_service())
+            if not is_satisfy:
+                self.importerError = self.importer.get_importer_errors()
+                return False
         self.collect_type = collect_type
         self.importerError = []
         return True
@@ -128,17 +125,22 @@ class Transaction(object):
         return self.importerError
 
     def set_service_for_collection(self, collect_type):
+        #if (self.collect_type != collect_type):
         self.collect_type = collect_type
         if self.service is not None:
             self.disconnect_all_signals()
         if collect_type in self.services:
             self.service = self.services[collect_type][0]
+            if (len(self.services[collect_type]) > 1):
+                print("More than one module for the same action was loaded")
         else:
             self.service = None 
 
     def connect(self, signal_name, client_handle):
         if self.service:
             self.signals.append(self.service.connect(signal_name, client_handle))
+        else:
+            self._throwNotServiceError()
 
     def disconnect_all_signals(self):
         for signal in self.signals:
@@ -148,25 +150,31 @@ class Transaction(object):
     def need_root_access(self):
         if self.service:
             return self.service.need_root_access()
+        self._throwNotServiceError()
         return False
 
     def have_terminal(self):
         if self.service:
             return self.service.have_terminal()
+        self._throwNotServiceError()
         return False
 
     def set_terminal(self, ttyname):
         if self.service:
             self.service.set_terminal(ttyname)
+        else:
+            self._throwNotServiceError()
 
     def is_service_idle(self):
         if self.service:
             return self.service.is_service_idle()
-        return True
+        self._throwNotServiceError()
+        return False
 
     def get_cache_folder(self, collect_type=None):
         if self.service:
             return self.service.get_cache_folder(collect_type)
+        self._throwNotServiceError()
         return ""
 
     def search_files(self, path):
@@ -176,6 +184,7 @@ class Transaction(object):
             thread.start()
             self.loop.run()
             return result[0]
+        self._throwNotServiceError()
         return ""
 
     def get_all_local_packages(self, collect_type=None):
@@ -185,7 +194,8 @@ class Transaction(object):
             thread.start()
             self.loop.run()
             return result[0]
-        return []
+        self._throwNotServiceError()
+        return {}
 
     def get_all_remote_packages(self, collect_type=None):
         if self.service:
@@ -194,7 +204,18 @@ class Transaction(object):
             thread.start()
             self.loop.run()
             return result[0]
-        return []
+        self._throwNotServiceError()
+        return {}
+
+    def get_package_info(self, pkg_id, collect_type):
+        if self.service:
+            result = []
+            thread = Thread(target = self.service.get_package_info, args=(self.loop, result, pkg_id, collect_type))
+            thread.start()
+            self.loop.run()
+            return result[0]
+        self._throwNotServiceError()
+        return {}
 
     def get_local_packages(self, packages, collect_type=None):
         if self.service:
@@ -203,7 +224,8 @@ class Transaction(object):
             thread.start()
             self.loop.run()
             return result[0]
-        return []
+        self._throwNotServiceError()
+        return {}
 
     def get_remote_packages(self, packages, collect_type=None):
         if self.service:
@@ -212,7 +234,8 @@ class Transaction(object):
              thread.start()
              self.loop.run()
              return result[0]
-        return []
+        self._throwNotServiceError()
+        return {}
 
     def get_local_search(self, patterns, collect_type=None):
         if self.service:
@@ -221,7 +244,8 @@ class Transaction(object):
              thread.start()
              self.loop.run()
              return result[0]
-        return []
+        self._throwNotServiceError()
+        return {}
 
     def get_remote_search(self, patterns, collect_type=None):
         if self.service:
@@ -230,78 +254,116 @@ class Transaction(object):
              thread.start()
              self.loop.run()
              return result[0]
-        return []
+        self._throwNotServiceError()
+        return {}
 
     def prepare_transaction_install(self, pkgs_names, collect_type=None):
         if self.service:
-             thread = Thread(target = self.service.prepare_transaction_install, args=(pkgs_names, collect_type,))
-             thread.start()
+            thread = Thread(target = self.service.prepare_transaction_install, args=(pkgs_names, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def prepare_transaction_remove(self, pkgs_names, collect_type=None):
         if self.service:
-             thread = Thread(target = self.service.prepare_transaction_remove, args=(pkgs_names, collect_type,))
-             thread.start()
+            thread = Thread(target = self.service.prepare_transaction_remove, args=(pkgs_names, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
+
+    def prepare_transaction_commit(self, pkgs_status, collect_type=None):
+        if self.service:
+            thread = Thread(target = self.service.prepare_transaction_commit, args=(pkgs_status, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def commit(self):
         if self.service:
-             thread = Thread(target = self.service.commit, args=())
-             thread.start()
+            thread = Thread(target = self.service.commit, args=())
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def cancel(self):
         if self.service:
-             thread = Thread(target = self.service.cancel, args=())
-             thread.start()
+            thread = Thread(target = self.service.cancel, args=())
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def resolve_config_file_conflict(self, replace, old, new):
         if self.service:
-             thread = Thread(target = self.service.resolve_config_file_conflict, args=(replace, old, new,))
-             thread.start()
+            thread = Thread(target = self.service.resolve_config_file_conflict, args=(replace, old, new,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def resolve_medium_required(self, medium):
         if self.service:
-             thread = Thread(target = self.service.resolve_medium_required, args=(medium,))
-             thread.start()
+            thread = Thread(target = self.service.resolve_medium_required, args=(medium,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def resolve_package_providers(self, provider_select):
         if self.service:
-             thread = Thread(target = self.service.resolve_package_providers, args=(provider_select,))
-             thread.start()
+            thread = Thread(target = self.service.resolve_package_providers, args=(provider_select,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def check_updates(self, collect_type=None):
         if self.service:
-             thread = Thread(target = self.service.check_updates, args=(None, None, collect_type))
-             thread.start()
+            thread = Thread(target = self.service.check_updates, args=(None, None, collect_type))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def system_upgrade(self, show_updates = True, downgrade = False, collect_type=None):
         if self.service:
-             thread = Thread(target = self.service.system_upgrade, args=(downgrade, self.loop, collect_type,))
-             thread.start()
+            thread = Thread(target = self.service.system_upgrade, args=(downgrade, self.loop, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def write_config(self, array, collect_type=None):
         if self.service:
-             thread = Thread(target = self.service.write_config, args=(array, collect_type,))
-             thread.start()
+            thread = Thread(target = self.service.write_config, args=(array, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     '''  this need to be see  '''
-    def load_cache(self, async, collect_type=None):
+    def load_cache(self, forced=False, async=False, collect_type=None):
         if self.service:
-             thread = Thread(target = self.service.load_cache, args=(async, collect_type,))
-             thread.start()
+            thread = Thread(target = self.service.load_cache, args=(forced, async, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def refresh_cache(self, force_update, collect_type=None):#Test if this can removed latter.
         if self.service:
-             thread = Thread(target = self.service.refresh_cache, args=(force_update, collect_type,))
-             thread.start()
+            thread = Thread(target = self.service.refresh_cache, args=(force_update, collect_type,))
+            thread.start()
+        else:
+            self._throwNotServiceError()
 
     def have_cache(self, collect_type=None):
         if self.service:
             return self.service.have_cache(collect_type)
+        self._throwNotServiceError()
         return False
 
     def release(self):#Test if this can removed latter.
         if self.service:
-             thread = Thread(target = self.service.release_all, args=())
-             thread.start()
+            thread = Thread(target = self.service.release_all, args=())
+            thread.start()
+        else:
+            self._throwNotServiceError()
+
+    def _throwNotServiceError(self):
+        print("Not services found")
 
 class Installer():
     def __init__(self):
@@ -311,6 +373,7 @@ class Installer():
         self.mainWind = ApplicationGUI.ControlWindow(self.mainApp)
         self.paren_window = None
         self.paren_builder = None
+        print("was create an installer")
 
     def setParentRef(self, window, builder):
         '''We need to set the main windows to
@@ -358,36 +421,43 @@ class Installer():
             print("Not implemented, provide a way to update modules for different installer")
         return True
     '''
-    def execute_install(self, collect_type, pkgs_name, callback=None):
-        pkgs_list = self._create_packages_list(pkgs_name)
+    def execute_install(self, collect_type, pkgs_list, callback=None):
         if len(pkgs_list) > 0:
             self.mainWind.show()
-            self.trans.prepare_transaction_install(pkgs_list)
+            self.trans.prepare_transaction_install(pkgs_list, collect_type)
             self.mainWind.run()
         else:
             print("Error, not packages founds")
 
-    def execute_uninstall(self, collect_type, pkgs_name, callback=None):
-        pkgs_list = self._create_packages_list(pkgs_name)
+    def execute_uninstall(self, collect_type, pkgs_list, callback=None):
         if len(pkgs_list) > 0:
             self.mainWind.show()
-            self.trans.prepare_transaction_remove(pkgs_list)
+            self.trans.prepare_transaction_remove(pkgs_list, collect_type)
             self.mainWind.run()
         else:
             print("Error, not packages founds")
+
+    def execute_commit(self, collect_type, pkgs_status, callback=None):
+        if len(pkgs_list) > 0:
+            self.mainWind.show()
+            self.trans.prepare_transaction_commit(pkgs_status, collect_type)
+            self.mainWind.run()
+        else:
+            print("Error, not packages founds")
+
     '''
     def execute_uninstall_program(self, programName, callback=None):
         self.register_collection("package")
         self.mainWind.preformUninstall(programName);
     '''
-    def execute_upgrade(self, collect_type, pkgs_namee, callback=None):
+    def execute_upgrade(self, collect_type, pkgs_list, callback=None):
         self.register_collection(collect_type)
         #self.mainWind.run()
         #self.trans.upgrade_system(safe_mode=False, 
         #                          reply_handler=self._simulate_trans,
         #                          error_handler=self._on_error)
 
-    def execute_update(self, collect_type, packageName, callback=None):
+    def execute_update(self, collect_type, pkgs_list, callback=None):
         self.register_collection(collect_type)
         #self.mainWind.run()
         #self.trans.update_cache(repaly_handler=self._run_transaction,
@@ -405,14 +475,11 @@ class Installer():
             return result[0]
         return None
 
-    def load_cache(self, force=False, collect_type=None, callback=None):
+    def load_cache(self, forced=False, async=False, collect_type=None, callback=None):
         self.register_collection(collect_type)
-        if force or not self.have_cache(collect_type):
-            self.trans.load_cache(True, collect_type)
-            if callback and callable(callback):
-                self.trans.connect("EmitTransactionDone", callback)
-        elif callback and callable(callback):
-            callback(self.trans.service, "Done")
+        self.trans.load_cache(forced, async, collect_type)
+        if callback and callable(callback):
+            self.trans.connect("EmitTransactionDone", callback)
 
     def refresh_cache(self, show_window, collect_type, callback=None):
         self.register_collection(collect_type)
@@ -435,6 +502,9 @@ class Installer():
         self.register_collection(collect_type)
         return self.trans.get_all_remote_packages(collect_type)
 
+    def get_package_info(self, pkg_id, collect_type):
+        self.register_collection(collect_type)
+        return self.trans.get_package_info(pkg_id, collect_type)
         
     #def load(self, mod_name, on_spice_load, force):
         '''
@@ -466,14 +536,6 @@ class Installer():
     def get_cache_folder(self, collect_type):
         self.register_collection(collect_type)
         return self.trans.get_cache_folder(collect_type)
-
-    def _create_packages_list(self, pkgs_name):
-        unfilter_pkg_list = pkgs_name.split(",")
-        pkg_list = []
-        for pkg in unfilter_pkg_list:
-            if ((pkg != "") and (pkg not in pkg_list)):
-                pkg_list.append(pkg)
-        return pkg_list
 
     '''
     def check_update_silent(self):
@@ -508,51 +570,6 @@ class Installer():
     '''
     def errorMessage(title, desc):
         print("Not implemented errorMessage")
-       
-
-class Spice_Harvester_Composed(GObject.GObject):
-    __gsignals__ = {
-        "EmitTransactionStart": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
-        "EmitTransactionDone": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
-        "EmitTarget": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
-        "EmitPercent": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_FLOAT,)),
-        "EmitTransactionCancellable": (GObject.SIGNAL_RUN_LAST, None, (GObject.TYPE_BOOLEAN,)),
-        "EmitTransactionError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING,))
-    }
-    def __init__(self):
-        GObject.GObject.__init__(self)
-        self.name = "Spice_Harvester"
-        self.supported_modules = ["applet", "desklet", "extension", "theme", "package"]
-        self.installer = {}
-        self.modules = {}
-
-        self.trans = Transaction(self.supported_modules)
-        self.trans.set_service_for_collection("applet")
-        self.trans.load_cache(True)
-        self.importerError = self.trans.get_importer_errors()
-        self.mainApp = ApplicationGUI.MainApp()
-        self.mainWind = ApplicationGUI.ControlWindow(self.mainApp, self.trans)
-
-    def set_parent_ref(self, window, builder):
-        self.builder = builder
-        self.window = window
-
-    def score(self):
-        return 0
-
-    def register_module(self, module):
-        collect_type = module.sidePage.collection_type
-        if (collect_type in self.supported_modules):
-            try:
-                module.sidePage.set_installer(self)
-                self.installer[collect_type] = SpiceHarvesterCinnamon.Spice_Harvester_Cinnamon(collect_type, self.window, self.builder, self)
-                self.modules[collect_type] = module
-                return True
-            except Exception:
-                e = sys.exc_info()[1]
-                print("Error " + str(e))
-                return False
-        return False
 
 __default_installer__ = None
 

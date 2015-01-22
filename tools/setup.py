@@ -22,7 +22,7 @@
 from __future__ import print_function
 
 try:
-    import sys, py_compile, os, shutil, stat, subprocess, gettext
+    import sys, py_compile, os, pwd, grp, shutil, stat, subprocess, gettext
     #from distutils.core import setup
     #from distutils import cmd
     #from distutils.command.install_data import install_data as _install_data
@@ -32,10 +32,18 @@ except Exception:
     print(str(e))
     sys.exit(1)
 
+def get_home():
+    if "SUDO_USER" in os.environ:
+        return os.path.expanduser("~" + os.environ["SUDO_USER"])
+    elif "PKEXEC_UID" in os.environ:
+        return os.path.expanduser("~" + pwd.getpwuid(int(os.environ["PKEXEC_UID"])).pw_name)
+    else:
+        return os.path.expanduser("~" + pwd.getpwuid(os.getuid()).pw_name)
+
 ABS_PATH = os.path.abspath(__file__)
 DIR_PATH = os.path.dirname(os.path.dirname(ABS_PATH)) + "/"
 
-HOME_PATH = os.path.expanduser("~")
+HOME_PATH = get_home()
 INSTALL_PATH = "/usr/lib/cinnamon-installer/"
 LOCAL_PATH = os.path.join(HOME_PATH, ".local/share/cinnamon-installer/")
 

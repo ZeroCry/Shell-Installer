@@ -28,11 +28,9 @@ from __future__ import print_function
 import sys, os
 
 try:
-    import tempfile, time, zipfile, string, shutil, cgi, subprocess, signal
-    #from datetime import datetime
+    import tempfile, time, string, shutil, subprocess, signal, cgi, datetime
     from gi.repository import Gtk, GObject
-    from threading import Thread
-    from multiprocessing import Lock#, Queue 
+    import threading
 except Exception:
     e = sys.exc_info()[1]
     print(str(e))
@@ -43,58 +41,35 @@ try:
 except ImportError:
     import simplejson as json
 
-import SpicesPackages
+import SpicesPackages, SystemTools, UtilitiesTools
 
 from gi.repository import GObject
 
 ABS_PATH = os.path.abspath(__file__)
-DIR_PATH = os.path.dirname(ABS_PATH) + "/"
+DIR_PATH = os.path.dirname(ABS_PATH)
 
 # i18n
 import gettext, locale
-LOCALE_PATH = DIR_PATH + "locale"
+LOCALE_INSTALL_PATH = os.path.join(DIR_PATH, "locale")
 DOMAIN = "cinnamon-installer"
-locale.bindtextdomain(DOMAIN , LOCALE_PATH)
+locale.bindtextdomain(DOMAIN , LOCALE_INSTALL_PATH)
 locale.bind_textdomain_codeset(DOMAIN , "UTF-8")
-gettext.bindtextdomain(DOMAIN, LOCALE_PATH)
+gettext.bindtextdomain(DOMAIN, LOCALE_INSTALL_PATH)
 gettext.bind_textdomain_codeset(DOMAIN , "UTF-8")
 gettext.textdomain(DOMAIN)
 _ = gettext.gettext
 
-home = os.path.expanduser("~")
-locale_inst = "%s/.local/share/locale" % home
-settings_dir = "%s/.cinnamon/configs/" % home
+
+EFECTIVE_USER = SystemTools.get_user()
+EFECTIVE_IDS = [SystemTools.get_user_id(EFECTIVE_USER), SystemTools.get_group_id(EFECTIVE_USER)]
+EFECTIVE_MODE = SystemTools.get_standar_mode()
+HOME_PATH = SystemTools.get_home(EFECTIVE_USER)
+
+LOCALE_PATH = "%s/.local/share/locale" % HOME_PATH
+SETTINGS_PATH = "%s/.cinnamon/configs/" % HOME_PATH
 
 URL_SPICES_HOME = "http://cinnamon-spices.linuxmint.com"
 
-ABORT_NONE = 0
-ABORT_ERROR = 1
-ABORT_USER = 2
-
-CI_STATUS = {
-    "RESOLVING_DEPENDENCIES": "Resolving dep",
-    "SETTING_UP": "Setting up",
-    "LOADING_CACHE": "Loading cache",
-    "AUTHENTICATING": "authenticating",
-    "DOWNLOADING": "Downloading",
-    "DOWNLOADING_REPO": "Downloading repo",
-    "RUNNING": "Running",
-    "COMMITTING": "Committing",
-    "INSTALLING": "Installing",
-    "REMOVING": "Removing",
-    "CHECKING": "Checking",
-    "FINISHED": "Finished",
-    "WAITING": "Waiting",
-    "WAITING_LOCK": "Waiting lock",
-    "WAITING_MEDIUM": "Waiting medium",
-    "WAITING_CONFIG_FILE": "Waiting config file",
-    "CANCELLING": "Cancelling",
-    "CLEANING_UP": "Cleaning up",
-    "QUERY": "Query",
-    "DETAILS": "Details",
-    "UNKNOWN": "Unknown"
-}
-'''
 CI_STATUS = {
     "status-resolving-dep": "RESOLVING_DEPENDENCIES",
     "status-setting-up": "SETTING-UP",
@@ -104,8 +79,8 @@ CI_STATUS = {
     "status-downloading-repo": "DOWNLOADING_REPO",
     "status-running": "RUNNING",
     "status-committing": "COMMITTING",
-    #"status-installing": "INSTALLING",
-    #"status-removing": "REMOVING",
+    "status-installing": "INSTALLING",
+    "status-removing": "REMOVING",
     "status-finished": "FINISHED",
     "status-waiting": "WAITING",
     "status-waiting-lock": "WAITING_LOCK",
@@ -117,35 +92,7 @@ CI_STATUS = {
     "status-details": "DETAILS",
     "status-unknown": "UNKNOWN"
 }
-'''
 
-def rec_mkdir(path):
-    if os.path.exists(path):
-        return
-    
-    rec_mkdir(os.path.split(path)[0])
-
-    if os.path.exists(path):
-        return
-    os.mkdir(path)
-
-def removeEmptyFolders(path):
-    if not os.path.isdir(path):
-        return
-
-    # remove empty subfolders
-    files = os.listdir(path)
-    if len(files):
-        for f in files:
-            fullpath = os.path.join(path, f)
-            if os.path.isdir(fullpath):
-                removeEmptyFolders(fullpath)
-
-    # if folder empty, delete it
-    files = os.listdir(path)
-    if len(files) == 0:
-        print("Removing empty folder:" + path)
-        os.rmdir(path)
 
 class InstallerModule():
     def __init__(self):
@@ -174,7 +121,7 @@ class InstallerService(GObject.GObject):
         "EmitIcon": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitTarget": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitPercent": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_FLOAT,)),
-        "EmitDownloadPercentChild": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
+        "EmitDownloadPercentChild":(GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
         "EmitDownloadChildStart": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_BOOLEAN,)),
         "EmitLogError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitLogWarning": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
@@ -192,14 +139,20 @@ class InstallerService(GObject.GObject):
         GObject.GObject.__init__(self)
         self.cache = SpicesPackages.SpiceCache()
         self.index_cache = {}
+        self.packages_action = {}
+        self.collection_type = None
         self.error = None
         self.has_cache = False
-        self.collection_type = None
+        self.client_response = True
         self.module = None
         self.max_process = 3
-        self.lock = Lock()
+        self.cancellable = True
+        self.lock_trans = threading.Lock()
+        self.client_condition = threading.Condition()
         self.validTypes = self.cache.get_valid_types();
         self.cacheTypesLength = len(self.validTypes)
+        self.download_helper = UtilitiesTools.DownloadHelper()
+        print("Was create an spices Module")
 
     def need_root_access(self):
         return False
@@ -211,28 +164,37 @@ class InstallerService(GObject.GObject):
         pass
 
     def is_service_idle(self):
-        return True
+        return not self.lock_trans.locked()
 
-    def load_cache(self, async, collect_type=None):
+    def load_cache(self, forced=False, async=False, collect_type=None):
         self.EmitTransactionStart("Start")
-        if (not collect_type):
-            if (async):
-                for collect_type in self.validTypes:
-                    thread = Thread(target = self.cache.load_collection_type, args=(collect_type, self.cache_load_finished))
-                    thread.start()
-            else:
-                self.cache.load(self.cache_load_finished)
-        elif collect_type:
-            if (async):
-                thread = Thread(target = self.cache.load_collection_type, args=(collect_type, self.cache_load_finished))
-                thread.start()
-            else:
-                self.cache.load_collection_type(collect_type, self.cache_load_finished)
-        #self.executer.load_cache(async)
-
-    def cache_load_finished(self):
+        self.EmitRole("Loading cache...")
+        self._internal_load_cache(True, forced, async, collect_type, self._on_cache_load_finished)
         self.EmitTransactionDone("Finished")
-        print("finished on_refresh_assets_finished")
+
+    def _internal_load_cache(self, emit=False, forced=False, async=False, collect_type=None, on_finish=None):
+        if forced or (not self.cache.is_load(collect_type)):
+            if (not collect_type):
+                if (async):
+                    for collect_type in self.validTypes:
+                        if emit:
+                            self.EmitStatus("status-loading-cache", _("Loading cache for %ss...") % collect_type)
+                        thread = threading.Thread(target = self.cache.load_collection_type, args=(collect_type, on_finish))
+                        thread.start()
+                else:
+                    self.cache.load(on_finish)
+            elif collect_type:
+                if emit:
+                    self.EmitStatus("status-loading-cache", _("Loading cache for %ss...") % collect_type)
+                if (async):
+                    thread = threading.Thread(target = self.cache.load_collection_type, args=(collect_type, on_finish))
+                    thread.start()
+                else:
+                    self.cache.load_collection_type(collect_type, on_finish)
+
+    def _on_cache_load_finished(self):
+        self.EmitTransactionDone("Finished")
+        print("finished cache_load_finished")
 
     def have_cache(self, collect_type=None):
         return self.cache.is_load(collect_type)
@@ -251,6 +213,7 @@ class InstallerService(GObject.GObject):
 
     def get_all_local_packages(self, loop, result, collect_type=None):
         try:
+            self._internal_load_cache(True, False, False, collect_type)
             result.append(self.cache.get_local_packages(collect_type))
         except Exception:
             result.append([])
@@ -261,6 +224,7 @@ class InstallerService(GObject.GObject):
 
     def get_all_remote_packages(self, loop, result, collect_type=None):
         try:
+            self._internal_load_cache(True, False, False, collect_type)
             result.append(self.cache.get_remote_packages(collect_type))
         except Exception:
             result.append([])
@@ -269,8 +233,19 @@ class InstallerService(GObject.GObject):
         time.sleep(0.1)
         loop.quit()
 
+    def get_package_info(self, loop, result, pkg_id, collect_type):
+        try:
+            self._internal_load_cache(True, False, False, collect_type)
+            result.append(self.cache.get_package_info(pkg_id, collect_type))
+        except Exception:
+            result.append([])
+            e = sys.exc_info()[1]
+            print(str(e))
+        time.sleep(0.1)
+        loop.quit()
+
     def get_local_packages(self, packages, loop, result, collect_type=None):
-        get_local_packages
+        pass
 
     def get_remote_packages(self, packages, loop, result, collect_type=None):
         pass
@@ -282,16 +257,145 @@ class InstallerService(GObject.GObject):
         pass
 
     def prepare_transaction_install(self, packages, collect_type=None):
-        pass
+        self.packages_action = {}
+        self.EmitTransactionStart("start")
+        self.EmitRole(_("Preparing to install..."))
+        self.EmitIcon("cinnamon-installer-search")
+        pkg_list = {}
+        self._internal_load_cache(True, False, False, collect_type)
+        if collect_type and collect_type in self.validTypes:
+            self.collection_type = collect_type
+            for uuid in packages:
+                pkg = self.cache.get_package_info(uuid, collect_type)
+                if pkg is not None:
+                    print("load packages")
+                    pkg_list[uuid] = pkg
+        else:
+            self.collection_type = None
+            for uuid in packages:
+                for collect_type in self.validTypes:
+                    pkg = self.cache.get_package_info(uuid, collect_type)
+                    if pkg is not None:
+                        pkg_list[uuid] = pkg
+                        break # Now the first match, but we can emit a singal EmitConflictFile or other new later.
+        total_count = len(pkg_list)
+        if total_count > 0:
+            self.packages_action["install"] = pkg_list
+            info_config = { "title": "", "description": "", "dependencies": {} }
+            self.EmitStatus("status-waiting", _("Waiting..."))
+            print("waiting")
+            self.EmitTransactionConfirmation(info_config)
+            #we ar waiting for a commit
+        else:
+            self.EmitTransactionDone("Error")
 
     def prepare_transaction_remove(self, packages, collect_type=None):
-        pass
+        self.packages_action = {}
+        self.EmitTransactionStart("start")
+        self.EmitRole(_("Preparing to remove..."))
+        self.EmitIcon("cinnamon-installer-search")
+        pkg_list = {}
+        self._internal_load_cache(True, False, False, collect_type)
+        if collect_type and collect_type in self.validTypes:
+            self.collection_type = collect_type
+            for uuid in packages:
+                pkg = self.cache.get_package_info(uuid, collect_type)
+                if pkg is not None:
+                    pkg_list[uuid] = pkg
+        else:
+            self.collection_type = None
+            for uuid in packages:
+                for collect_type in self.validTypes:
+                    pkg = self.cache.get_package_info(uuid, collect_type)
+                    if pkg is not None:
+                        pkg_list[uuid] = pkg
+                        break # Now the first match, but we can emit a singal EmitConflictFile or other new later.
+        total_count = len(pkg_list)
+        if total_count > 0:
+            self.packages_action["remove"] = pkg_list
+            info_config = { "title": "", "description": "", "dependencies": {} }
+            self.EmitStatus("status-waiting", _("Waiting..."))
+            self.EmitTransactionConfirmation(info_config)
+            #we ar waiting for a commit
+        else:
+            self.EmitTransactionDone("Error")
+
+    def prepare_transaction_commit(self, packages_status, collect_type=None):
+        self.packages_action = {}
+        self.EmitTransactionStart("start")
+        self.EmitRole(_("Preparing to do a complex transaction..."))
+        self.EmitIcon("cinnamon-installer-search")
+        pkg_list = {}
+        self._internal_load_cache(True, False, False, collect_type)
+        if collect_type and collect_type in self.validTypes:
+            self.collection_type = collect_type
+            for uuid in packages:
+                pkg = self.cache.get_package_info(uuid, collect_type)
+                if pkg is not None:
+                    pkg_list[uuid] = pkg
+        else:
+            self.collection_type = None
+            for uuid in packages:
+                for collect_type in self.validTypes:
+                    pkg = self.cache.get_package_info(uuid, collect_type)
+                    if pkg is not None:
+                        pkg_list[uuid] = pkg
+                        break # Now the first match, but we can emit a singal EmitConflictFile or other new later.
+        total_count = len(pkg_list)
+        if total_count > 0:
+            self.packages_action["remove"] = pkg_list
+            info_config = { "title": "", "description": "", "dependencies": {} }
+            self.EmitStatus("status-waiting", _("Waiting..."))
+            self.EmitTransactionConfirmation(info_config)
+            #we ar waiting for a commit
+        else:
+            self.EmitTransactionDone("Error")
 
     def commit(self):
-        pass
+        packages = self.packages_action
+        collect_type = self.collection_type
+        actions = self.packages_action.keys()
+        if not self.client_response:
+            self.client_condition.acquire()
+            self.client_response = True
+            self.client_condition.notify()
+            self.client_condition.release()
+            try:
+                self.EmitStatus("status-committing", _("Committing"))
+                if len(actions) > 0:
+                    if len(actions) == 1:
+                        if "install" in actions:
+                            self._install_all(packages["install"])
+                        elif "remove" in actions:
+                            self._uninstall_all(packages["remove"])
+                    else:
+                        self._commit_all(packages)
+                    self._internal_load_cache(False, True, False, collect_type)
+                else:
+                    raise Exception(_("Nothing to do..."))
+            except Exception:
+                e = sys.exc_info()[1]
+                error = _("The transaction can not be performed.")
+                self.EmitTransactionError(error, str(e))
+                print(str(e))
 
     def cancel(self):
-        pass
+        try:
+            self.download_helper.cancel_download()
+            if self.lock_trans.locked():
+                self.lock_trans.release()
+            if not self.client_response:
+                self.client_condition.acquire()
+                self.client_response = True
+                self.client_condition.notify()
+                self.client_condition.release()
+        except:
+            pass
+
+    def _on_cancel_finished(self):
+        self._signals = []
+        print("bye")
+        self.current_trans = None
 
     def resolve_config_file_conflict(replace, old, new):
         pass
@@ -314,540 +418,420 @@ class InstallerService(GObject.GObject):
     def release_all(self):
         pass
 
-    def refresh_cache(self, force_update=False, collect_type=None): #See if this can be moved or removed
-        load_assets = force_update
-        install_errors = {}#Queue()
-        valid_task = {}
-        self.EmitTransactionStart("Start")
-        self.EmitStatus("DOWNLOADING", _("Downloading"))
-        self.EmitDownloadChildStart(False)
+    def get_image_from_collection(self, collect_type):
+        if collect_type:
+            return "cs-%ss" % collect_type
+        return ""
+
+    def refresh_cache(self, force_update=False, collect_type=None):
+        url_list = {}
+        self.EmitRole(_("Refreshing index..."))
         if collect_type and collect_type in self.validTypes:
-            total_count = 1
-            valid_task[collect_type] = [Thread(target = self._refresh_cache_type, args=(collect_type, total_count,
-                                        valid_task,)), -1, install_errors]
+            self.EmitStatus("status-downloading", _("Downloading index for %ss" % collect_type))
+            cache_folder = self.get_cache_folder(collect_type)
+            cache_file = os.path.join(cache_folder, "index.json")
+            url_list[self.cache.get_index_url(collect_type)] = {
+                "collect-type":collect_type,
+                "path":cache_file,
+                "force-update":force_update
+            }
+            self.EmitDownloadPercentChild(collect_type, self.get_image_from_collection(collect_type), "%s index" % collect_type, 0, "")
         else:
-            total_count = len(self.validTypes)
             for collect_type in self.validTypes:
-                valid_task[collect_type] = [Thread(target = self._refresh_cache_type, args=(collect_type, total_count,
-                                            valid_task,)), -1, install_errors]
-        self._try_start_task(valid_task, self.max_process)
+                self.EmitRole(_("Refreshing index."))
+                cache_folder = self.get_cache_folder(collect_type)
+                cache_file = os.path.join(cache_folder, "index.json")
+                url_list[self.cache.get_index_url(collect_type)] = {
+                    "collect-type":collect_type,
+                    "path":cache_file,
+                    "force-update":force_update
+                }
+                self.EmitDownloadPercentChild(collect_type, self.get_image_from_collection(collect_type), "%s index" % collect_type, 0, "")
+        self.EmitIcon("cinnamon-installer-download")
+        self.EmitTransactionCancellable(True)
+        self.EmitStatus("status-downloading", _("Downloading index for %ss" % collect_type))
+        works = self.download_helper.download_files(url_list, False, self._reporthook_cache, url_list)
+        self.EmitStatus("status-running", _("Updatating cache..."))
+        self.EmitIcon("cinnamon-installer-update")
+        assets_list = []
+        if not self.download_helper.is_download_cancelled():
+            for url in works:
+                if works[url]["error"]:
+                    self.EmitLogError(works[url]["error"])
+                if works[url]["result"]:
+                    collect_type = url_list[url]["collect-type"]
+                    assets_list.append(collect_type)
+        if len(assets_list) > 0:
+            if force_update:
+                self._refresh_assets(assets_list)
+        else:
+            self.EmitTransactionError(_("Download aborted."), "")
+            self.EmitTransactionDone("Download Fail")
 
+    def _reporthook_cache(self, url, count, block_size, total_size, pending_downloads, url_list):
+        total_count = len(url_list)
+        collect_type = url_list[url]["collect-type"]
+        force_update = url_list[url]["force-update"]
 
-    def _refresh_cache_type(self, collect_type, total_count, valid_task):
-        self.EmitRole(_("Refreshing index for %ss" % collect_type))
-        self.EmitDownloadPercentChild(collect_type, "%s index" % collect_type, 0, "")
-        self.cache.refresh_cache_type([collect_type, total_count, valid_task], self.reporthook_refresh)
-        self._on_refresh_finished(collect_type, total_count, valid_task, "")
-
-    def reporthook_refresh(self, count, block_size, total_size, user_param):
-        [collect_type, total_count, valid_task] = user_param
         percent = int((float(count*block_size)/total_size)*100)
-        self.EmitDownloadPercentChild(collect_type, "%ss index" % collect_type, percent, "")
-        procc_count = 0
-        for uuid in valid_task:
-            if valid_task[uuid][1] < 0:
-                procc_count += 1
-        count = float(total_count - procc_count - 1)/total_count
-        total_percent = (100*count + percent/(count+1))/10
+        self.EmitDownloadPercentChild(collect_type, self.get_image_from_collection(collect_type), "%ss index" % collect_type, percent, "")
+        count = float(total_count - pending_downloads)
+        if (force_update):
+            total_percent = 4*(100*count + percent)/(total_count*5)
+        else:
+            total_percent = (100*count + percent)/total_count
         self.EmitPercent(total_percent)
         targent = "%s" % (str(int(total_percent)) + "%")
         self.EmitTarget(targent)
 
-    def _on_refresh_finished(self, collect_type, total_count, valid_task, error):
-        self.lock.acquire()
-        valid_task[collect_type][1] = 1
-        procc_count = self._try_start_task(valid_task, self.max_process)
-        if(procc_count == 0):
-            print("refresh_finished")
-            if len(valid_task.keys()) == 1:
-                self._refresh_assets(collect_type)
+    def _refresh_assets(self, assets_list):
+        self.EmitDownloadChildStart(False)
+        url_list_assets = {}
+        for collect_type in assets_list:
+            self.EmitStatus("status-loading-cache", _("Refreshing cache for %ss" % collect_type))
+            self.EmitIcon("cinnamon-installer-search")
+            self.cache.load_collection_type(collect_type)
+            assets = self.cache.get_assets_type_to_refresh(collect_type)
+            for url in assets:
+                url_list_assets[url] = {
+                    "collect-type":collect_type,
+                    "path":assets[url]["icon"],
+                    "uuid":assets[url]["uuid"],
+                    "name":assets[url]["name"],
+                    "last-edited":assets[url]["last-edited"]
+                }
+        total_count = len(url_list_assets)
+        if total_count > 0:
+            self.EmitTransactionCancellable(True)
+            self.EmitIcon("cinnamon-installer-download")
+            self.EmitStatus("status-downloading", _("Downloading cache for %ss" % collect_type))
+            works = self.download_helper.download_files(url_list_assets, False, self._reporthook_assets, url_list_assets)
+            can_continue = False
+            if not self.download_helper.is_download_cancelled():
+                for url in works:
+                    if works[url]["error"]:
+                        self.EmitLogError(works[url]["error"])
+                    if works[url]["result"]:
+                        can_continue = True
+            if can_continue:
+                self.EmitTransactionDone("complete")
             else:
-                self._refresh_assets()
-        '''
-        if (self.has_cache and not force):
-            self.load_cache()
+                self.EmitTransactionError(_("Download aborted."), "")
+                self.EmitTransactionDone("Download Fail")
         else:
-            precentText = ("{transferred}/{size}").format(transferred = self.noun, size = self.cacheTypesLength)
-            target = _("Refreshing %s index...") % (precentText)
-            self.EmitTarget(target)
-            self.refresh_cache()
-        '''
-        self.lock.release()
+            self.EmitStatus("status-finished", _("We don't find any other thing to update."))
+            self.EmitTransactionDone("complete")
 
-    def _refresh_assets(self, collect_type=None):
-        valid_task = {}
-        install_errors = {}
-        max_process = 1
-        self.EmitStatus("DOWNLOADING", _("Downloading"))
-        if collect_type and collect_type in self.validTypes:
-            total_count = 1
-            valid_task[collect_type] = [Thread(target = self._refresh_assets_type,
-                                        args=(collect_type, total_count, valid_task,)), -1, install_errors]
-        else:
-            total_count = len(self.validTypes)
-            for collect_type in self.validTypes:
-                valid_task[collect_type] = [Thread(target = self._refresh_assets_type,
-                                            args=(collect_type, total_count, valid_task,)), -1, install_errors]
-        self._try_start_task(valid_task, max_process)
-
-
-    def _refresh_assets_type(self, collect_type, total_count, valid_task):
-        self.EmitRole(_("Refreshing cache for %ss" % collect_type))
-        self.EmitDownloadChildStart(False)
-        assets = self.cache.get_assets_type_to_refresh(collect_type)
-        internal_total_count = len(assets.keys())
-        if internal_total_count > 0:
-            internal_valid_task = {}
-            install_errors = {}
-            for download_url in assets:
-                internal_valid_task[download_url] = [Thread(target = self._refresh_assets_type_async,
-                    args=(assets[download_url], collect_type, download_url, total_count, internal_total_count, valid_task,
-                    internal_valid_task,)), -1, install_errors]
-            self._try_start_task(internal_valid_task, self.max_process)
-        else:
-            self._on_refresh_assets_finished(None, collect_type, "", total_count, valid_task, None)
-
-    def _refresh_assets_type_async(self, package, collect_type, download_url, total_count, internal_total_count, valid_task, internal_valid_task):
-        self.EmitDownloadPercentChild(str(package["uuid"]), str(package["name"]), 0, str(package["last-edited"]))
-        self.cache.refresh_asset([package, total_count, internal_total_count, valid_task, internal_valid_task], download_url, self.reporthook_assets)
-        error = None
-        is_really_finished = self._on_refresh_assets_type_finished(package, download_url, total_count, internal_valid_task, error)
-        if (is_really_finished):
-            self._on_refresh_assets_finished(package, collect_type, download_url, total_count, valid_task, error)
-        return True
-
-    def reporthook_assets(self, count, block_size, total_size, user_param):
-        [package, total_count, internal_total_count, valid_task, internal_valid_task] = user_param
+    def _reporthook_assets(self, url, count, block_size, total_size, pending_downloads, url_list):
+        total_count = len(url_list)
+        collect_type = url_list[url]["collect-type"]
+        uuid = url_list[url]["uuid"]
+        name = url_list[url]["name"]
+        last_edited = url_list[url]["last-edited"]
         percent = int((float(count*block_size)/total_size)*100)
-        self.EmitDownloadPercentChild(str(package["uuid"]), str(package["name"]), percent, str(package["last-edited"]))
-        internal_procc_count = 0
-        for uuid in internal_valid_task:
-            if internal_valid_task[uuid][1] < 0:
-                internal_procc_count += 1
-        procc_count = 0
-        for uuid in valid_task:
-            if valid_task[uuid][1] < 0:
-                procc_count += 1
-        out_count = float(total_count - procc_count - 1)/total_count
-        int_count = float(internal_total_count - internal_procc_count - 1)/internal_total_count
-        total_percent = 10 + 90*(out_count + int_count/total_count)
+        time = datetime.datetime.fromtimestamp(last_edited).strftime("%Y-%m-%d -- %H:%M:%S")
+        self.EmitDownloadPercentChild(uuid, self.get_image_from_collection(collect_type), name, percent, time)
+        count = float(total_count - pending_downloads)
+        total_percent = 80 + (100*count + percent)/(total_count*5)
         self.EmitPercent(total_percent)
         targent = "%s" % (str(int(total_percent)) + "%")
         self.EmitTarget(targent)
 
-    def _on_refresh_assets_type_finished(self, package, download_url, total_count, valid_task, error):
-        self.lock.acquire()
-        is_really_finished = False
-        valid_task[download_url][1] = 1
-        procc_count = self._try_start_task(valid_task, self.max_process)
-        #del valid_task[download_url][1]
-        if (procc_count == 0):
-            print("finished on_refresh_assets_type_finished")
-            is_really_finished = True
-        self.lock.release()
-        return is_really_finished
-
-    def _on_refresh_assets_finished(self, package, collect_type, download_url, total_count, valid_task, error):
-        self.lock.acquire()
-        max_process = 1
-        valid_task[collect_type][1] = 1
-        procc_count = self._try_start_task(valid_task, max_process)
-        #del valid_task[collect_type]
-        if(procc_count == 0):
-            self.EmitTransactionDone("Finished")
-            print("finished on_refresh_assets_finished")
-        self.lock.release()
-
-    def _try_start_task(self, valid_task, max_process):
-        procc_count = 0
-        for uuid in valid_task:
-            if valid_task[uuid][1] == 0:
-                procc_count += 1
-        for uuid in valid_task:
-           if (valid_task[uuid][1] < 0) and (procc_count < max_process):
-               valid_task[uuid][1] = 0
-               valid_task[uuid][0].start()
-               procc_count += 1
-        return procc_count
-
-    def install_all(self, collect_type, uuid_list):
+    def _download_packages(self, pkg_download):
         self.abort_download = False
-        total_count = len(uuid_list)
-        install_errors = {}#Queue()
-        valid_task = {}
-        for uuid in uuid_list:
-            pkg = self.cache.get_package_from_collection(collect_type, uuid)
-            if not pkg:
-                #install_errors.put([uuid, _("%s not found") % uuid])
-                install_errors[uuid] = _("%s not found") % uuid
-                self.on_install_finished(pkg, total_count, install_errors)
-            else:
-                 #valid_task[uuid] = [Process(target = self._install_single, args=(pkg, total_count, self.on_install_finished, valid_task,)), -1, install_errors]
-                 valid_task[uuid] = [Thread(target = self._install_single, args=(pkg, total_count, self.on_install_finished, valid_task,)), -1, install_errors]
-        self._try_start_task(valid_task, self.max_process)
+        url_list = {}
+        for uuid in pkg_download:
+            pkg = pkg_download[uuid]
+            url_list[self.cache.get_package_url(pkg["collection"], uuid)] = {
+                "collect-type":pkg["collection"],
+                "uuid":uuid,
+                "path":None,
+                "name":pkg["name"],
+                "last-edited":pkg["last-edited"]
+            }
+        total_count = len(url_list)
+        pkg_list = {}
+        if total_count > 0:
+            self.EmitTransactionCancellable(True)
+            self.EmitIcon("cinnamon-installer-download")
+            self.EmitStatus("status-downloading", _("Downloading packages"))
 
-    def on_install_finished(self, pkg, total_count, valid_task, error):
-        self.lock.acquire()
-        uuid = pkg["uuid"]
-        install_errors = valid_task[uuid][2]
-        install_errors[uuid] = error
-        print("listo")
-        if len(install_errors.keys()) == total_count:
-            error_format = ""
-            for uuid in install_errors:
-                if install_errors[uuid]:
-                    error_format += install_errors[uuid] + "\n"
-                    print(error_format)
-        valid_task[uuid][1] = 1
-        procc_count = self._try_start_task(valid_task, self.max_process)
-        if(procc_count == 0):##End or error
+            works = self.download_helper.download_files(url_list, False, self._reporthook_packages, url_list)
+ 
+            if not self.download_helper.is_download_cancelled():
+                for url in works:
+                    if works[url]["error"]:
+                        self.EmitLogError(works[url]["error"])
+                    if works[url]["result"]:
+                        collect_type = url_list[url]["collect-type"]
+                        uuid = url_list[url]["uuid"]
+                        if not collect_type in pkg_list:
+                            pkg_list[collect_type] = {}
+                        pkg_list[collect_type][uuid] = { "path": works[url]["result"], "last-edited": url_list[url]["last-edited"] }
+        return pkg_list
+
+    def _reporthook_packages(self, url, count, block_size, total_size, pending_downloads, url_list):
+        total_count = len(url_list)
+        collect_type = url_list[url]["collect-type"]
+        uuid = url_list[url]["uuid"]
+        name = url_list[url]["name"]
+        last_edited = url_list[url]["last-edited"]
+        percent = int((float(count*block_size)/total_size)*100)
+        time = datetime.datetime.fromtimestamp(last_edited).strftime("%Y-%m-%d -- %H:%M:%S")
+        self.EmitDownloadPercentChild(uuid, self.get_image_from_collection(collect_type), name, percent, time)
+        count = float(total_count - pending_downloads)
+        total_percent = 9*(100*count + percent)/(total_count*10)
+        self.EmitPercent(total_percent)
+        targent = "%s" % (str(int(total_percent)) + "%")
+        self.EmitTarget(targent)
+
+    def _install_all(self, pkg_install):
+        self.EmitRole(_("Installing..."))
+        pkg_list = self._download_packages(pkg_install)
+        total_count = len(pkg_list)
+        if total_count > 0:
+            schema_filename_list = { "install": {}, "remove": {} }
+            self.EmitStatus("status-running", _("Installing..."))
+            self.EmitIcon("cinnamon-installer-install")
+            compressor = UtilitiesTools.CompressorHelper()
+            for collect_type in pkg_list:
+                for uuid in pkg_list[collect_type]:
+                    file_path = pkg_list[collect_type][uuid]["path"]
+                    edited_date = pkg_list[collect_type][uuid]["last-edited"]
+                    schema_filename = self._install_single(uuid, file_path, edited_date, compressor, collect_type)
+                    schema_filename_list["install"][uuid] = schema_filename
+            self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
-            self.abort_download = False
+            self._install_and_remove_schema_files(schema_filename_list)
             need_restart = False
-            print("end pool")
-        self.lock.release()
+        else:
+            self.EmitStatus("status-finished", _("We don't find any packages to install"))
+            self.EmitTransactionDone("complete")
+        self.abort_download = False
 
-    def _install_single(self, pkg, total_count, on_install_finished, valid_task):
-        #print("Start downloading and installation")
-        error = None
-        uuid = pkg["uuid"]
-        title = pkg["name"]
+    def _uninstall_all(self, pkg_remove):
+        self.EmitRole(_("Removing..."))
+        total_count = len(pkg_remove)
+        if total_count > 0:
+            schema_filename_list = { "install": {}, "remove": {} }
+            self.EmitStatus("status-running", _("Removing..."))
+            self.EmitIcon("cinnamon-installer-delete")
+            for uuid in pkg_remove:
+                collect_type = pkg_remove[uuid]["collection"]
+                if pkg_remove[uuid]["schema-file"]:
+                    schema_filename_list["remove"][uuid] = pkg_remove[uuid]["schema-file"]
+                edited_date = pkg_remove[uuid]["last-edited"]
+                self._uninstall_single(uuid, edited_date, collect_type)
+            self.EmitStatus("status-finished", _("Transaction sucefully.."))
+            self.EmitTransactionDone("Finished")
+            self._install_and_remove_schema_files(schema_filename_list)
+            need_restart = False
+        else:
+            self.EmitStatus("status-finished", _("We don't find any packages to install"))
+            self.EmitTransactionDone("complete")
+        self.abort_download = False
+
+    def _commit_all(self, pkg_status):
+        self.EmitRole(_("Installing..."))
+        pkg_list = self._download_packages(pkg_install)
+        total_count = len(pkg_list)
+        if total_count > 0:
+            self.EmitStatus("status-running", _("Installing..."))
+            self.EmitIcon("cinnamon-installer-install")
+            compressor = UtilitiesTools.CompressorHelper(collect_type)
+            for collect_type in pkg_list:
+                for uuid in pkg_list[collect_type]:
+                    file_path = pkg_list[collect_type][uuid]["schema-file"]
+                    edited_date = pkg_list[collect_type][uuid]["last-edited"]
+                    self._install_single(uuid, file_path, edited_date, compressor, collect_type)
+            self.EmitStatus("status-finished", _("Transaction sucefully.."))
+            self.EmitTransactionDone("Finished")
+            #self._install_and_remove_schema_files(arr_collect)
+            need_restart = False
+        else:
+            self.EmitStatus("status-finished", _("We don't find any packages to install"))
+            self.EmitTransactionDone("complete")
+        self.abort_download = False
+
+    def _install_single(self, uuid, file_path, edited_date, compressor, collect_type):
         error_title = uuid
+        schema_filename = ""
         try:
-            edited_date = pkg["last-edited"]
-            collect_type = pkg["collection"]
-
-            #self.progress_window.show()
-            #self.progresslabel.set_text(_("Installing %s...") % (title))
-            #self.progressbar.set_fraction(0)
-            fd, filename = tempfile.mkstemp()
-            dirname = tempfile.mkdtemp()
-            f = os.fdopen(fd, "wb")
-            self.cache.download_packages(pkg, f, filename, self.reporthook)
-            zip = zipfile.ZipFile(filename)
+            folder_path = tempfile.mkdtemp()
+            compressor.set_collection(collect_type)
+            compressor.extract_file(file_path, folder_path)
             if collect_type == "theme":
-                error_title = title
                 dest = self.cache.get_install_folder(collect_type)
-                zip.extractall(dirname)
-
                 # Check dir name - it may or may not be the same as the theme name from our spices data
                 # Regardless, this will end up being the installed theme name, whether it matched or not
-                temp_path = os.path.join(dirname, title)
+                temp_path = os.path.join(folder_path, title)
                 if not os.path.exists(temp_path):
-                    title = os.listdir(dirname)[0] # We assume only a single folder, the theme name
-                    temp_path = os.path.join(dirname, title)
+                    title = os.listdir(folder_path)[0] # We assume only a single folder, the theme name
+                    temp_path = os.path.join(folder_path, title)
 
                 # Test for correct folder structure - look for cinnamon.css
                 file = open(os.path.join(temp_path, "cinnamon", "cinnamon.css"), "r")
                 file.close()
-
                 md = {}
                 md["last-edited"] = edited_date
                 md["uuid"] = uuid
                 raw_meta = json.dumps(md, indent=4)
                 final_path = os.path.join(dest, title)
-                file = open(os.path.join(temp_path, "cinnamon", "metadata.json"), "w+")
+                metadata_file = os.path.join(temp_path, "cinnamon", "metadata.json")
             else:
                 error_title = uuid
                 dest = os.path.join(self.cache.get_install_folder(collect_type), uuid)
-                schema_filename = ""
-                zip.extractall(dirname, self.get_members(zip))
-                for file in self.get_members(zip):
-                    if not (file.filename.endswith("/")): #and ((file.external_attr >> 16L) & 0o755) == 0o755:
-                        os.chmod(os.path.join(dirname, file.filename), 0o755)
-                    elif file.filename[:3] == "po/":
+                members = compressor.get_members()
+                for file in members:
+                    file_locate = os.path.join(folder_path, file.filename)
+                    SystemTools.set_propietary_id(file_locate, EFECTIVE_IDS[0], EFECTIVE_IDS[1])
+                    SystemTools.set_mode(file_locate, EFECTIVE_MODE)
+                    if file.filename[:3] == "po/":
                         parts = os.path.splitext(file.filename)
                         if parts[1] == ".po":
-                           this_locale_dir = os.path.join(locale_inst, parts[0][3:], "LC_MESSAGES")
-                           #self.progresslabel.set_text(_("Installing translations for %s...") % title)
-                           rec_mkdir(this_locale_dir)
-                           #print("/usr/bin/msgfmt -c %s -o %s" % (os.path.join(dest, file.filename), os.path.join(this_locale_dir, "%s.mo" % uuid)))
-                           subprocess.call(["msgfmt", "-c", os.path.join(dirname, file.filename), "-o", os.path.join(this_locale_dir, "%s.mo" % uuid)])
-                           #self.progresslabel.set_text(_("Installing %s...") % (title))
+                            this_locale_dir = os.path.join(LOCALE_PATH, parts[0][3:], "LC_MESSAGES")
+                            #self.progresslabel.set_text(_("Installing translations for %s...") % title)
+                            SystemTools.rec_mkdir(this_locale_dir, EFECTIVE_MODE, EFECTIVE_IDS)
+                            #print("/usr/bin/msgfmt -c %s -o %s" % (os.path.join(dest, file.filename), os.path.join(this_locale_dir, "%s.mo" % uuid)))
+                            mo_file = os.path.join(this_locale_dir, "%s.mo" % uuid)
+                            subprocess.call(["msgfmt", "-c", file_locate, "-o", mo_file])
+                            SystemTools.set_propietary_id(mo_file, EFECTIVE_IDS[0], EFECTIVE_IDS[1])
+                            SystemTools.set_mode(mo_file, EFECTIVE_MODE)
+                            #self.progresslabel.set_text(_("Installing %s...") % (title))
                     elif "gschema.xml" in file.filename:
-                        sentence = _("Please enter your password to install the required settings schema for %s") % (uuid)
-                        if os.path.exists("/usr/bin/gksu") and os.path.exists("/usr/lib/cinnamon-settings/bin/installSchema.py"):
-                            launcher = "gksu  --message \"<b>%s</b>\"" % sentence
-                            tool = "/usr/lib/cinnamon-settings/bin/installSchema.py %s" % (os.path.join(dirname, file.filename))
-                            command = "%s %s" % (launcher, tool)
-                            os.system(command)
-                            schema_filename = file.filename
-                        else:
-                            error = _("Could not install the settings schema for %s.  You will have to perform this step yourself.") % (uuid)
-                            #self.errorMessage(error)
-                file = open(os.path.join(dirname, "metadata.json"), "r")
-                raw_meta = file.read()
-                file.close()
-                md = json.loads(raw_meta)
-                md["last-edited"] = edited_date
-                if schema_filename != "":
-                    md["schema-file"] = schema_filename
-                raw_meta = json.dumps(md, indent=4)
-                temp_path = dirname
-                final_path = dest
-                file = open(os.path.join(dirname, "metadata.json"), "w+")
-            file.write(raw_meta)
+                        pkg_list[collect_type][uuid]["schema-file"] = os.path.join(folder_path, file.filename)
+                        schema_filename = file.filename
+            file = open(os.path.join(folder_path, "metadata.json"), "r")
+            raw_meta = file.read()
             file.close()
-
+            md = json.loads(raw_meta)
+            md["last-edited"] = edited_date
+            if schema_filename != "":
+                md["schema-file"] = schema_filename
+            raw_meta = json.dumps(md, indent=4)
+            final_path = dest
+            metadata_file = os.path.join(folder_path, "metadata.json")
+            file = open(metadata_file, "w+")
+            file.write(raw_meta)
+            SystemTools.set_propietary_id(metadata_file, EFECTIVE_IDS[0], EFECTIVE_IDS[1])
+            SystemTools.set_mode(metadata_file, EFECTIVE_MODE)
+            file.close()
+            self.EmitStatus("status-cleaning-up", _("Cleaning up..."))
+            self.EmitIcon("cinnamon-installer-cleanup")
             if os.path.exists(final_path):
                 shutil.rmtree(final_path)
-            shutil.copytree(temp_path, final_path)
-            shutil.rmtree(dirname)
-            os.remove(filename)
-
+            shutil.copytree(folder_path, final_path)
+            shutil.rmtree(folder_path)
+            os.remove(file_path)
         except Exception:
-            #self.progress_window.hide()
             e = sys.exc_info()[1]
+            schema_filename = ""
             print("Error: " + str(e))
             try:
-                shutil.rmtree(dirname)
-                os.remove(filename)
+                shutil.rmtree(folder_path)
+                os.remove(file_path)
             except:
                 pass
             if not self.abort_download:
-                error = _("An error occurred during installation or updating.  You may wish to report this incident to the\
-                          developer of %s.\n\nIf this was an update, the previous installation is unchanged") % (error_title), str(detail)
-                #self.errorMessage(error)
-            return False
+                error = _("An error occurred during installation or updating of %s. %s. You may wish to report this incident to the developer.\nIf this was an update, the previous installation is unchanged") % (uuid, str(e))
+                self.EmitLogError(error)
+        return schema_filename
 
-        #self.progress_button_abort.set_sensitive(False)
-        #self.progress_window.show()
-        #install_errors.put([pkg["uuid"], error])
-        self.on_install_finished(pkg, total_count, valid_task, error)
-        return True
-
-    def show_detail(self, uuid, onSelect=None, onClose=None):
-        self.on_detail_select = onSelect
-        self.on_detail_close = onClose
-        if not self.has_cache:
-            self.refresh_cache(False)
-        elif len(self.index_cache) == 0:
-            self.load_cache()
-        if uuid not in self.index_cache:
-            self.EmitNeedDetails()
-            #self.load(lambda x: self.show_detail(uuid))
-            return
-        appletData = self.index_cache[uuid] 
-
-        # Browsing the info within the app would be great (ala mintinstall) but until it is fully ready 
-        # and it gives a better experience (layout, comments, reviewing) than 
-        # browsing online we will open the link with an external browser 
-        os.system("xdg-open '%s/%ss/view/%s'" % (URL_SPICES_HOME, self.collection_type, appletData["spices-id"]))
-        return
-        
-        screenshot_filename = os.path.basename(appletData["screenshot"])
-        screenshot_path = os.path.join(self.get_cache_folder(), screenshot_filename)
-        appletData["screenshot_path"] = screenshot_path
-        appletData["screenshot_filename"] = screenshot_filename
-
-        if not os.path.exists(screenshot_path):
-            f = open(screenshot_path, "w")
-            self.download_url = URL_SPICES_HOME + appletData["screenshot"]
-            self.download_with_progressbar(f, screenshot_path, _("Downloading screenshot"), False)
-
-        template = open(os.path.realpath(os.path.dirname(os.path.abspath(__file__)) + "/../data/spices/applet-detail.html")).read()
-        subs = {}
-        subs["appletData"] = json.dumps(appletData, sort_keys=False, indent=3)
-        html = string.Template(template).safe_substitute(subs)
-
-        # Prevent flashing previously viewed
-        self._sigLoadFinished = self.browser.connect("document-load-finished", lambda x, y: self.real_show_detail())
-        self.browser.load_html_string(html, "file:///")
-
-    def real_show_detail(self):
-        self.browser.show()
-        self.spiceDetail.show()
-        self.browser.disconnect(self._sigLoadFinished)
-
-    def browser_title_changed(self, view, frame, title):
-        if title.startswith("nop"):
-            return
-        elif title.startswith("install:"):
-            uuid = title.split(":")[1]
-            #self.install(uuid)
-        elif title.startswith("uninstall:"):
-            uuid = title.split(":")[1]
-            #self.uninstall(uuid, "")
-        return
-
-    def browser_console_message(self, view, msg, line, sourceid):
-        return
-        #print(msg)
-
-    def get_members(self, zip):
-        parts = []
-        for name in zip.namelist():
-            if not name.endswith("/"):
-                parts.append(name.split("/")[:-1])
-        prefix = os.path.commonprefix(parts) or ""
-        if prefix:
-            prefix = "/".join(prefix) + "/"
-        offset = len(prefix)
-        for zipinfo in zip.infolist():
-            name = zipinfo.filename
-            if len(name) > offset:
-                zipinfo.filename = name[offset:]
-                yield zipinfo
-
-    def uninstall(self, uuid, name, schema_filename, onFinished=None):
-        self.progresslabel.set_text(_("Uninstalling %s...") % name)
-        self.progress_window.show()
-        
-        self.progress_bar_pulse()
+    def _uninstall_single(self, uuid, edited_date, collect_type):
+        error = None
+        install_folder = self.cache.get_install_folder(collect_type)
+        self.EmitStatus("status-removing", _("Uninstalling %s...") % uuid)
         try:
             if collect_type != "theme":
-                if schema_filename != "":
-                    sentence = _("Please enter your password to remove the settings schema for %s") % (uuid)
-                    if os.path.exists("/usr/bin/gksu") and os.path.exists("/usr/lib/cinnamon-settings/bin/removeSchema.py"):
-                        launcher = "gksu  --message \"<b>%s</b>\"" % sentence
-                        tool = "/usr/lib/cinnamon-settings/bin/removeSchema.py %s" % (schema_filename)
-                        command = "%s %s" % (launcher, tool)
-                        os.system(command)
-                    else:
-                        self.errorMessage(_("Could not remove the settings schema for %s.  You will have to perform this step yourself.  This is not a critical error.") % (uuid))
-                shutil.rmtree(os.path.join(self.install_folder, uuid))
-
+                shutil.rmtree(os.path.join(install_folder, uuid))
                 # Uninstall spice localization files, if any
-                if (os.path.exists(locale_inst)):
-                    i19_folders = os.listdir(locale_inst)
+                if (os.path.exists(LOCALE_PATH)):
+                    i19_folders = os.listdir(LOCALE_PATH)
                     for i19_folder in i19_folders:
-                        if os.path.isfile(os.path.join(locale_inst, i19_folder, "LC_MESSAGES", "%s.mo" % uuid)):
-                            os.remove(os.path.join(locale_inst, i19_folder, "LC_MESSAGES", "%s.mo" % uuid))
+                        if os.path.isfile(os.path.join(LOCALE_PATH, i19_folder, "LC_MESSAGES", "%s.mo" % uuid)):
+                            os.remove(os.path.join(LOCALE_PATH, i19_folder, "LC_MESSAGES", "%s.mo" % uuid))
                         # Clean-up this locale folder
-                        removeEmptyFolders(os.path.join(locale_inst, i19_folder))
+                        SystemTools.removeEmptyFolders(os.path.join(LOCALE_PATH, i19_folder))
 
                 # Uninstall settings file, if any
-                if (os.path.exists(os.path.join(settings_dir, uuid))):
-                    shutil.rmtree(os.path.join(settings_dir, uuid))
+                if (os.path.exists(os.path.join(SETTINGS_PATH, uuid))):
+                    shutil.rmtree(os.path.join(SETTINGS_PATH, uuid))
             else:
-                shutil.rmtree(os.path.join(self.install_folder, name))
+                shutil.rmtree(os.path.join(install_folder, uuid))
         except Exception:
             e = sys.exc_info()[1]
-            self.progress_window.hide()
-            self.errorMessage(_("Problem uninstalling %s.  You may need to manually remove it.") % (uuid), str(e))
+            error = _("Problem uninstalling %s. %s. You may need to manually remove it.") % (uuid, str(e))
+            self.EmitLogError(error)
 
-        self.progress_window.hide()
-
-        if callable(onFinished):
-            onFinished(uuid)
-
-    def on_abort_clicked(self, button):
-        self.abort_download = ABORT_USER
-        self.progress_window.hide()
-        return
-
-    def on_refresh_clicked(self):
-        self.load_index()
-
-    def download_with_progressbar(self, outfd, outfile, caption="Please wait..", waitForClose=True):
-        self.progressbar.set_fraction(0)
-        self.progressbar.set_text("0%")        
-        self.progresslabel.set_text(caption)
-        self.progress_window.show()
-
-        while Gtk.events_pending():
-            Gtk.main_iteration()
-        
-        self.progress_bar_pulse()
-        self.download(outfd, outfile)
-
-        if not waitForClose:
-            time.sleep(0.5)
-            self.progress_window.hide()
-        else:
-            self.progress_button_abort.set_sensitive(False)
-
-    def progress_bar_pulse(self):       
-        count = 0
-        self.progressbar.set_pulse_step(0.1)
-        while count < 1:
-            time.sleep(0.1)
-            self.progressbar.pulse()
-            count += 1
-            while Gtk.events_pending():
-                Gtk.main_iteration()
-
-    def reporthook(self, count, block_size, total_size, user_param):
-        # for install user_param = pkg
-        if totalSize > 0:
-            fraction = float((count*block_size)/total_size);
-        #targent = "%s - %d / %d files" % (str(int(fraction*100)) + "%", self.download_current_file, self.download_total_files)
-        targent = "%s - %d / %d files"% (str(int(fraction*100)) + "%", 1, 1)
-        self.EmitTarget(targent)
-        print(str(block_size/total_size))
-        '''
-        if self.download_total_files > 1:
-            fraction = (float(self.download_current_file) / float(self.download_total_files));
-            self.progressbar.set_text("%s - %d / %d files" % (str(int(fraction*100)) + "%", self.download_current_file, self.download_total_files))
-        else:
-            fraction = count * blockSize / float((totalSize / blockSize + 1) *
-                (blockSize))
-            self.progressbar.set_text(str(int(fraction * 100)) + "%")
-
-        if fraction > 0:
-            self.progressbar.set_fraction(fraction)
-        else:
-            self.progress_bar_pulse()
-
-        while Gtk.events_pending():
-            Gtk.main_iteration()
-        '''
-
-    def scrubConfigDirs(self, enabled_list):
-        active_list = {}
-        for enabled in enabled_list:
-            if self.collection_type == "applet":
-                panel, align, order, uuid, id = enabled.split(":")
-            elif self.collection_type == "desklet":
-                uuid, id, x, y = enabled.split(":")
+    def _install_and_remove_schema_files(self, schema_files):
+        schema_install_list = ""
+        schema_remove_list = ""
+        for uuid in schema_files["install"]:
+            schema_install_list = schema_install_list + " " + schema_files["install"][uuid]
+        for uuid in schema_files["remove"]:
+            schema_remove_list = schema_remove_list + " " + schema_files["install"][uuid]
+        if schema_install_list or schema_remove_list:
+            tool = os.path.join(ABS_PATH, "tools/schema-installer.py")
+            launcher = ""
+            if self._is_program_in_system("pkexec"):
+                launcher = "pkexec"
+            elif os.path.exists("/usr/bin/gksu"):
+                launcher = "gksu"
+            if os.path.exists(tool) and launcher:
+                if schema_install_list and schema_remove_list:
+                    if launcher == "pkexec":
+                        os.execvp(launcher, [launcher, tool, "-i", schema_install_list, "-u", schema_remove_list])
+                    elif launcher == "gksu":
+                        sentence = _("Please enter your password to install and remove the required settings schema.")
+                        launcher = launcher + " --message \"<b>%s</b>\"" % sentence
+                        target = "%s -i %s -u %s" % (tool, schema_install_list, schema_remove_list)
+                        command = "%s %s" % (launcher, target)
+                        os.system(command)
+                elif schema_install_list:
+                    if launcher == "pkexec":
+                        os.execvp(launcher, [launcher, tool, "-i", schema_install_list])
+                    elif launcher == "gksu":
+                        sentence = _("Please enter your password to install the required settings schema.")
+                        launcher = launcher + " --message \"<b>%s</b>\"" % sentence
+                        target = "%s -i %s" % (tool, schema_install_list)
+                        command = "%s %s" % (launcher, target)
+                        os.system(command)
+                elif schema_remove_list:
+                    if launcher == "pkexec":
+                        os.execvp(launcher, [launcher, tool, "-u", schema_remove_list])
+                    elif launcher == "gksu":
+                        sentence = _("Please enter your password to remove the required settings schema.")
+                        launcher = launcher + " --message \"<b>%s</b>\"" % sentence
+                        target = "%s -u %s" % (tool, schema_remove_list)
+                        command = "%s %s" % (launcher, target)
+                        os.system(command)
             else:
-                uuid = enabled
-                id = 0
-            if uuid not in active_list:
-                id_list = []
-                active_list[uuid] = id_list
-                active_list[uuid].append(id)
-            else:
-                active_list[uuid].append(id)
+                uuid_install = ""
+                uuid_remove = ""
+                for uuid in schema_files["install"]:
+                    uuid_install = uuid_install + ", " + uuid
+                for uuid in schema_files["remove"]:
+                    uuid_remove = uuid_remove + ", " + uuid 
+                error = _("Could not install or remove the settings schema files for%s. You will have to perform this step yourself.") % (uuid_install + uuid_remove)
+                self.EmitLogError(error)
 
-        for uuid in active_list.keys():
-            if (os.path.exists(os.path.join(settings_dir, uuid))):
-                dir_list = os.listdir(os.path.join(settings_dir, uuid))
-                for id in active_list[uuid]:
-                    fn = str(id) + ".json"
-                    if fn in dir_list:
-                        dir_list.remove(fn)
-                fn = str(uuid) + ".json"
-                if fn in dir_list:
-                    dir_list.remove(fn)
-                for jetsam in dir_list:
-                    try:
-                        os.remove(os.path.join(settings_dir, uuid, jetsam))
-                    except:
-                        pass
+    def _is_program_in_system(self, programName):
+        path = os.getenv("PATH")
+        for p in path.split(os.path.pathsep):
+            p = os.path.join(p, programName)
+            if os.path.exists(p) and os.access(p, os.X_OK):
+                return True
+        return False
 
-    def errorMessage(self, msg, detail = None):
-        dialog = Gtk.MessageDialog(transient_for = None,
-                                   modal = True,
-                                   message_type = Gtk.MessageType.ERROR,
-                                   buttons = Gtk.ButtonsType.OK)
-        markup = msg
-        if detail is not None:
-            markup += _("\n\nDetails:  %s") % (str(detail))
-        esc = cgi.escape(markup)
-        dialog.set_markup(esc)
-        dialog.show_all()
-        response = dialog.run()
-        dialog.destroy()
-
-    def on_progress_close(self, widget, event):
-        self.abort_download = True
-        return widget.hide_on_delete()
+    def _client_confirm_trans(self):
+        return self.client_response
 
     def EmitStatus(self, status, status_translation):
         if status == "":
-            status = "DETAILS"
-        self.emit("EmitStatus", status, status_translation)
+            status_ci = "DETAILS"
+        else:
+            status_ci = CI_STATUS[status]
+        self.emit("EmitStatus", status_ci, status_translation)
 
     def EmitRole(self, role):
         self.emit("EmitRole", role)
@@ -864,8 +848,8 @@ class InstallerService(GObject.GObject):
     def EmitPercent(self, percent):
         self.emit("EmitPercent", percent)
 
-    def EmitDownloadPercentChild(self, id, name, percent, details):
-        self.emit("EmitDownloadPercentChild", id, name, percent, details)
+    def EmitDownloadPercentChild(self, id, img, name, percent, details):
+        self.emit("EmitDownloadPercentChild", id, img, name, percent, details)
 
     def EmitDownloadChildStart(self, restar_all):
         self.emit("EmitDownloadChildStart", restar_all)
@@ -880,16 +864,30 @@ class InstallerService(GObject.GObject):
         self.emit("EmitAvailableUpdates", syncfirst, updates)
 
     def EmitTransactionStart(self, message):
+        self.abort_download = True
+        self.lock_trans.acquire()
         self.emit("EmitTransactionStart", message)
 
     def EmitTransactionDone(self, message):
         self.emit("EmitTransactionDone", message)
+        self.packages = None
+        self.collection_type = None
 
     def EmitTransactionError(self, title, message):
+        self.abort_download = True
         self.emit("EmitTransactionError", title, message)
+        self.packages = None
+        self.collection_type = None
 
     def EmitTransactionConfirmation(self, info_config):
+        self.client_response = False
         self.emit("EmitTransactionConfirmation", info_config)
+        self.client_condition.acquire()
+        while not self._client_confirm_trans():
+            self.client_condition.wait()
+        self.client_condition.release()
+        self.packages = None
+        self.collection_type = None
 
     def EmitTransactionCancellable(self, cancellable):
         self.emit("EmitTransactionCancellable", cancellable)

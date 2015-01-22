@@ -104,7 +104,7 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
         "EmitIcon": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitTarget": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitPercent": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_FLOAT,)),
-        "EmitDownloadPercentChild": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
+        "EmitDownloadPercentChild":(GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_FLOAT, GObject.TYPE_STRING,)),
         "EmitDownloadChildStart": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_BOOLEAN,)),
         "EmitLogError": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
         "EmitLogWarning": (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_STRING,)),
@@ -159,7 +159,7 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
     def release_all(self):
         pass
 
-    def load_cache(self, async, collect_type=None):
+    def load_cache(self, forced=False, async=False, collect_type=None):
         pass
 
     def have_cache(self, collect_type=None):
@@ -218,6 +218,9 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
         except GLib.GError:
             e = sys.exc_info()[1]
             print(str(e))
+        loop.quit()
+
+    def get_package_info(self, loop, result, pkg_id, collect_type):
         loop.quit()
 
     def get_local_packages(self, packages, loop, result, collect_type=None):
@@ -378,8 +381,8 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
             self.authorized = True
         if self.authorized:
             self.install_packages(packages,
-                              reply_handler=self._simulate_trans,
-                              error_handler=self._on_error)
+                                  reply_handler=self._simulate_trans,
+                                  error_handler=self._on_error)
         else:
             self.EmitTransactionError(_("Authentication failed"), _("Authentication failed"))
         self.authorized = False
@@ -397,8 +400,34 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
             self.authorized = True
         if self.authorized:
             self.remove_packages(packages,
-                              reply_handler=self._simulate_trans,
-                              error_handler=self._on_error)
+                                 reply_handler=self._simulate_trans,
+                                 error_handler=self._on_error)
+        else:
+            self.EmitTransactionError(_("Authentication failed"), _("Authentication failed"))
+        self.authorized = False
+
+    def prepare_transaction_commit(self, packages_status, collect_type=None): #new and need to be tested
+        if (self.daemon_permission):
+            try:
+                self._policykit_test("org.cinnamon.installer.commit")
+            except Exception:
+                e = sys.exc_info()[1]
+                self.authorized = False
+                self.EmitLogError(_("Authentication failed"))
+                print(str(e))
+        else:
+            self.authorized = True
+        if self.authorized:
+            self._parse_packages_status(packages_status)
+            self.commit_packages(packages_status["install"],
+                                 packages_status["reinstall"],
+                                 packages_status["remove"],
+                                 packages_status["purge"],
+                                 packages_status["purge"],
+                                 packages_status["upgrade"],
+                                 packages_status["downgrade"],
+                                 reply_handler=self._simulate_trans,
+                                 error_handler=self._on_error)
         else:
             self.EmitTransactionError(_("Authentication failed"), _("Authentication failed"))
         self.authorized = False
@@ -409,6 +438,20 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
                                       error_handler=self._on_cancel_error) 
         else:
             self._on_cancel_finished()
+
+    def _parse_packages_status(self, packages_status):
+        if not "install" in packages_status:
+            packages_status["install"] = []
+        if not "reinstall" in packages_status:
+            packages_status["reinstall"] = []
+        if not "remove" in packages_status:
+            packages_status["remove"] = []
+        if not "purge" in packages_status:
+            packages_status["purge"] = []
+        if not "upgrade" in packages_status:
+            packages_status["upgrade"] = []
+        if not "downgrade" in packages_status:
+            packages_status["downgrade"] = []
 
     def _on_cancel_finished(self):
         self._signals = []
@@ -511,7 +554,7 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
                 description += _("Downloaded")
         else:
             description += get_download_status_from_enum(status)
-        self.EmitDownloadPercentChild(uri, desc[:], progress, description)
+        self.EmitDownloadPercentChild(uri, "cs-packages", desc[:], progress, description)
 
     def _on_terminal_attached_changed(self, transaction, attached):
         self.EmitTerminalAttached(attached)
@@ -859,8 +902,8 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
     def EmitPercent(self, percent):
         self.emit("EmitPercent", percent)
 
-    def EmitDownloadPercentChild(self, id, name, percent, details):
-        self.emit("EmitDownloadPercentChild", id, name, percent, details)
+    def EmitDownloadPercentChild(self, id, img, name, percent, details):
+        self.emit("EmitDownloadPercentChild", id, img, name, percent, details)
 
     def EmitDownloadChildStart(self, restar_all):
         self.emit("EmitDownloadChildStart", restar_all)

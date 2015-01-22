@@ -63,7 +63,7 @@ try:
 except ImportError:
     e = sys.exc_info()[1]
 
-import InstallerProviders
+import InstallerProviders, SystemTools
 
 class InstallerService(dbus.service.Object):
     def __init__(self, installerAction):
@@ -113,11 +113,13 @@ class InstallerService(dbus.service.Object):
     def uninstallSpices(self, spicesList):
         self.installerAction.uninstallSpices(spicesList)
 
-    @dbus.service.method(dbus_interface='org.cinnamon.Installer')
-    def getPackageByName(self, packageName):
+    @dbus.service.method(dbus_interface='org.cinnamon.Installer', async_callbacks=("reply_handler", "error_handler"))
+    def getPackageByName(self, packageName, reply_handler, error_handler):
         listPackages = self.installerAction.getPackageByName(packageName)
         if(len(listPackages) == 0):
             listPackages.append("empty")
+        if reply_handler:
+            reply_handler(listPackages)
         self.SearchResult(listPackages)
         return listPackages
 
@@ -213,56 +215,59 @@ class InstallerAction():
         self.installer = InstallerProviders.get_default()
         self.importerError = self.installer.get_importer_errors()
 
-    def install(self, packageName):
+    def install(self, pkg_names):
         if self.installer.need_root_access("package") and (os.geteuid() != 0):
             self._reloadAsRoot("--ipackage", pkgs_name)
         else:
-            self.installer.execute_install("package", packageName)
+            pkgs_list = self._create_packages_list(pkg_names)
+            self.installer.execute_install("package", pkgs_list)
 
-    def uninstall(self, packageName):
+    def uninstall(self, pkg_names):
         if self.installer.need_root_access("package") and (os.geteuid() != 0):
-            self._reloadAsRoot("--upackage", packageName)
+            self._reloadAsRoot("--upackage", pkg_names)
         else:
-            self.installer.execute_uninstall("package", packageName)
+            pkgs_list = self._create_packages_list(pkg_names)
+            self.installer.execute_uninstall("package", pkgs_list)
 
-    def uninstallProgram(self, programName):
+    def uninstallProgram(self, program_name):
         if self.installer.need_root_access("package") and (os.geteuid() != 0):
-            self._reloadAsRoot("--uprogram", programName)
+            self._reloadAsRoot("--uprogram", program_name)
         else:
-            packageName = self.findPackageForProgram(programName)
-            if packageName:
-                self.installer.execute_uninstall("package", packageName)
+            pkg_names = self.findPackageForProgram(program_name)
+            if pkg_names:
+                pkgs_list = self._create_packages_list(pkg_names)
+                self.installer.execute_uninstall("package", pkgs_list)
             else:
-                title = _("Not found any package associated with the program '%s'.") % programName
+                title = _("Not found any package associated with the program '%s'.") % program_name
                 message = _("If you detect any problem or you want to contribute,\n" + \
                       "please visit: <a href='%s'>Cinnamon Installer</a>.") % WEB_SITE_URL
                 self.mainAppWindows.show_error(title, message)
 
-    def installSpices(self, spicesList):
+    def installSpices(self, spice_ids):
         if self.installer.need_root_access("applet") and (os.geteuid() != 0):
-            self._reloadAsRoot("--icinnamon", spicesList)
+            self._reloadAsRoot("--icinnamon", spice_ids)
         else:
-            self.installer.execute_install("package", spicesList)
+            pkgs_list = self._create_packages_list(spice_ids)
+            self.installer.execute_install("applet", pkgs_list)
 
-    def uninstallSpices(self, spicesList):
-        if self.installer.need_root_access() and (os.geteuid() != 0):
-            self._reloadAsRoot("--ucinnamon", spicesList)
+    def uninstallSpices(self, spice_ids):
+        if self.installer.need_root_access("applet") and (os.geteuid() != 0):
+            self._reloadAsRoot("--ucinnamon", spice_ids)
         else:
-            self.installer.register_collection("applet")
-            self.installer.set_service_for_collection("applet")
-            self.installer.execute_uninstall(spicesList)
+            pkgs_list = self._create_packages_list(spice_ids)
+            self.installer.execute_uninstall("applet", pkgs_list)
 
     def upgradeSpices(self, spicesList):
         self.installer.register_collection("applet")
-        if self.installer.need_root_access() and (os.geteuid() != 0):
-            self._reloadAsRoot("--ccinnamon", spicesList)
+        if self.installer.need_root_access("applet") and (os.geteuid() != 0):
+            self._reloadAsRoot("--rcinnamon", spicesList)
         else:
             self.installer.execute_upgrade(spicesList)
 
     def updateSpices(self, updateType):
         self.installer.register_collection("applet")
-        if self.installer.need_root_access() and (os.geteuid() != 0):
-            self._reloadAsRoot("--rcinnamon", spicesList)
+        if self.installer.need_root_access("applet") and (os.geteuid() != 0):
+            self._reloadAsRoot("--ucinnamon", spicesList)
         else:
             self.installer.execute_update(spicesList)
 
@@ -364,7 +369,8 @@ class InstallerAction():
                 print("reload as root")
                 return True
             elif self._is_program_in_system("gksudo"):
-                message = _("The program %s is requesting elevated privileges to perform a change on your system.\nEnter the root password to allow this task.") % ("Cinnamon Installer")
+                message = _("The program %s is requesting elevated privileges to perform a change on your system.") % ("Cinnamon Installer")
+                message = message + "\n" +_("Enter the root password to allow this task.") 
                 subprocess.call(["gksudo", "--message", message, pathCallBack + " " + option + " " + value])
                 print("reload as root")
                 return True
@@ -373,6 +379,14 @@ class InstallerAction():
             print("fail to load as root")
             print(str(e))
         return False
+
+    def _create_packages_list(self, pkg_names):
+        unfilter_pkg_list = pkg_names.split(",")
+        pkg_list = []
+        for pkg in unfilter_pkg_list:
+            if ((pkg != "") and (pkg not in pkg_list)):
+                pkg_list.append(pkg)
+        return pkg_list
 
     def _is_program_in_system(self, programName):
         path = os.getenv('PATH')
@@ -423,6 +437,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     #cinnamon need to be called --action "colltype [list of type , separator]"
     try:
+        # from under sudo
         if(args.service):
             dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
             if(args.service == "start"):

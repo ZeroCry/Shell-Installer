@@ -40,9 +40,9 @@ gettext.bind_textdomain_codeset(DOMAIN , "UTF-8")
 gettext.textdomain(DOMAIN)
 _ = gettext.gettext
 
-aur_url = "http://aur.archlinux.org"
-rpc_url = aur_url + "/rpc.php"
-srcpkgdir = "/tmp/installer"
+AUR_URL = "http://aur.archlinux.org"
+RPC_URL = AUR_URL + "/rpc.php"
+SRC_PKG_PATH = "/tmp/installer"
 
 class AURPkg():
     def __init__(self, pkginfo):
@@ -134,7 +134,7 @@ def get_pkgs(pkgbuild_path):
 def search(args):
     spec = {"type":"search", "arg":args}
     try:
-        r = requests.get(rpc_url, params = spec)
+        r = requests.get(RPC_URL, params = spec)
         r.raise_for_status()
     except Exception:
         e = sys.exc_info()[1]
@@ -152,7 +152,7 @@ def search(args):
 def info(pkgname):
     spec = {"type":"info", "arg":pkgname}
     try:
-        r = requests.get(rpc_url, params = spec)
+        r = requests.get(RPC_URL, params = spec)
         r.raise_for_status()
     except Exception:
         e = sys.exc_info()[1]
@@ -175,7 +175,7 @@ def info(pkgname):
 def multiinfo(pkgnames):
     spec = {"type":"multiinfo", "arg[]":pkgnames}
     try:
-        r = requests.get(rpc_url, params = spec)
+        r = requests.get(RPC_URL, params = spec)
         r.raise_for_status()
     except Exception:
         e = sys.exc_info()[1]
@@ -198,16 +198,16 @@ def multiinfo(pkgnames):
 
 def get_extract_tarball(pkg):
     try:
-        r = requests.get(aur_url + pkg.tarpath)
+        r = requests.get(AUR_URL + pkg.tarpath)
         r.raise_for_status()
     except Exception:
         e = sys.exc_info()[1]
         print(str(e))
         return None
     else:
-        if not os.path.exists(srcpkgdir):
-            os.makedirs(srcpkgdir)
-        full_tarpath = os.path.join(srcpkgdir, os.path.basename(pkg.tarpath))
+        if not os.path.exists(SRC_PKG_PATH):
+            os.makedirs(SRC_PKG_PATH)
+        full_tarpath = os.path.join(SRC_PKG_PATH, os.path.basename(pkg.tarpath))
         try:
             with open(full_tarpath, "wb") as f:
                 f.write(r.content)
@@ -218,13 +218,13 @@ def get_extract_tarball(pkg):
         else:
             try:
                 tar = tarfile.open(full_tarpath)
-                tar.extractall(path = srcpkgdir)
+                tar.extractall(path = SRC_PKG_PATH)
             except Exception:
                 e = sys.exc_info()[1]
                 print(str(e))
                 return None
             else:
-                return os.path.join(srcpkgdir, get_name(pkg))
+                return os.path.join(SRC_PKG_PATH, get_name(pkg))
 
 def get_name(pkg):
     # the splitext is to remove the original extension

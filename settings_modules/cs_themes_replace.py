@@ -29,7 +29,10 @@ from gi.repository import GObject
 from gi.repository.Gtk import SizeGroup, SizeGroupMode
 from SettingsInstallerWidgets import *
 
+import SystemTools
+
 ICON_SIZE = 48
+HOME_PATH = SystemTools.get_home() #os.path.expanduser("~")
 
 def sortArr(listSA): #change to support python3
     try:
@@ -132,7 +135,7 @@ class ThemesViewSidePage (ExtensionSidePage):
 
             if self.new_themes:
                 self.monitors = []
-                for path in [os.path.expanduser("~/.themes"), "/usr/share/themes", os.path.expanduser("~/.icons"), "/usr/share/icons"]:
+                for path in [os.path.join(HOME_PATH, ".themes"), "/usr/share/themes", os.path.join(HOME_PATH, ".icons"), "/usr/share/icons"]:
                     if os.path.exists(path):
                         file_obj = Gio.File.new_for_path(path)
                         file_monitor = file_obj.monitor_directory(Gio.FileMonitorFlags.SEND_MOVED, None)
@@ -255,7 +258,7 @@ class ThemesViewSidePage (ExtensionSidePage):
             chooser.set_picture_from_file(path)
         else:
             for path in ["/usr/share/%s/%s/%s/thumbnail.png" % (path_prefix, theme, path_suffix), 
-                         os.path.expanduser("~/.%s/%s/%s/thumbnail.png" % (path_prefix, theme, path_suffix)), 
+                         os.path.join(HOME_PATH, ".%s/%s/%s/thumbnail.png" % (path_prefix, theme, path_suffix)), 
                          "/usr/share/cinnamon/thumbnails/%s/%s.png" % (path_suffix, theme), 
                          "/usr/share/cinnamon/thumbnails/%s/unknown.png" % path_suffix]:                        
                 if os.path.exists(path):
@@ -325,7 +328,7 @@ class ThemesViewSidePage (ExtensionSidePage):
 
     def _load_gtk_themes(self):
         """ Only shows themes that have variations for gtk+-3 and gtk+-2 """
-        dirs = ("/usr/share/themes", os.path.join(os.path.expanduser("~"), ".themes"))
+        dirs = ("/usr/share/themes", os.path.join(HOME_PATH, ".themes"))
         valid = walk_directories(dirs, lambda d: os.path.exists(os.path.join(d, "gtk-2.0")) and os.path.exists(os.path.join(d, "gtk-3.0")), return_directories=True)
         #valid.sort(lambda a,b: cmp(a[0].lower(), b[0].lower()))
         sortArr(valid)
@@ -337,7 +340,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
     
     def _load_icon_themes(self):
-        dirs = ("/usr/share/icons", os.path.join(os.path.expanduser("~"), ".icons"))
+        dirs = ("/usr/share/icons", os.path.join(HOME_PATH, ".icons"))
         valid = walk_directories(dirs, lambda d: os.path.isdir(d) and not os.path.exists(os.path.join(d, "cursors")) and os.path.exists(os.path.join(d, "index.theme")))
         #valid.sort(lambda a,b: cmp(a.lower(), b.lower()))
         sortVal(valid)
@@ -347,7 +350,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
         
     def _load_cursor_themes(self):
-        dirs = ("/usr/share/icons", os.path.join(os.path.expanduser("~"), ".icons"))
+        dirs = ("/usr/share/icons", os.path.join(HOME_PATH, ".icons"))
         valid = walk_directories(dirs, lambda d: os.path.isdir(d) and os.path.exists(os.path.join(d, "cursors")), return_directories=True)
         #valid.sort(lambda a,b: cmp(a[0].lower(), b[0].lower()))
         sortArr(valid)
@@ -357,7 +360,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
         
     def _load_metacity_themes(self):
-        dirs = ("/usr/share/themes", os.path.join(os.path.expanduser("~"), ".themes"))
+        dirs = ("/usr/share/themes", os.path.join(HOME_PATH, ".themes"))
         valid = walk_directories(dirs, lambda d: os.path.exists(os.path.join(d, "metacity-1")), return_directories=True)
         #valid.sort(lambda a,b: cmp(a[0].lower(), b[0].lower()))
         sortArr(valid)
@@ -367,7 +370,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
 
     def _load_cinnamon_themes(self):
-        dirs = ("/usr/share/themes", os.path.join(os.path.expanduser("~"), ".themes"))
+        dirs = ("/usr/share/themes", os.path.join(HOME_PATH, ".themes"))
         valid = walk_directories(dirs, lambda d: os.path.exists(os.path.join(d, "cinnamon")), return_directories=True)
         #valid.sort(lambda a,b: cmp(a[0].lower(), b[0].lower()))
         sortArr(valid)
@@ -378,7 +381,7 @@ class ThemesViewSidePage (ExtensionSidePage):
 
     def _load_gtk_themes_old(self):
         """ Only shows themes that have variations for gtk+-3 and gtk+-2 """
-        dirs = ("/usr/share/themes", os.path.join(os.path.expanduser("~"), ".themes"))
+        dirs = ("/usr/share/themes", os.path.join(HOME_PATH, ".themes"))
         valid = walk_directories(dirs, lambda d: os.path.exists(os.path.join(d, "gtk-2.0")) and os.path.exists(os.path.join(d, "gtk-3.0")))
         #valid.sort(lambda a,b: cmp(a.lower(), b.lower()))
         sortVal(valid)
@@ -388,7 +391,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
     
     def _load_icon_themes_old(self):
-        dirs = ("/usr/share/icons", os.path.join(os.path.expanduser("~"), ".icons"))
+        dirs = ("/usr/share/icons", os.path.join(HOME_PATH, ".icons"))
         valid = walk_directories(dirs, lambda d: os.path.isdir(d) and not os.path.exists(os.path.join(d, "cursors")) and os.path.exists(os.path.join(d, "index.theme")))
         #valid.sort(lambda a,b: cmp(a.lower(), b.lower()))
         sortVal(valid)
@@ -398,7 +401,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
         
     def _load_keybinding_themes_old(self):
-        dirs = ("/usr/share/themes", os.path.join(os.path.expanduser("~"), ".themes"))
+        dirs = ("/usr/share/themes", os.path.join(HOME_PATH, ".themes"))
         valid = walk_directories(dirs, lambda d: os.path.isfile(os.path.join(d, "gtk-3.0", "gtk-keys.css")) and os.path.isfile(os.path.join(d, "gtk-2.0-key", "gtkrc")))
         #valid.sort(lambda a,b: cmp(a.lower(), b.lower()))
         sortVal(valid)
@@ -408,7 +411,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
         
     def _load_cursor_themes_old(self):
-        dirs = ("/usr/share/icons", os.path.join(os.path.expanduser("~"), ".icons"))
+        dirs = ("/usr/share/icons", os.path.join(HOME_PATH, ".icons"))
         valid = walk_directories(dirs, lambda d: os.path.isdir(d) and os.path.exists(os.path.join(d, "cursors")))
         #valid.sort(lambda a,b: cmp(a.lower(), b.lower()))
         sortVal(valid)
@@ -418,7 +421,7 @@ class ThemesViewSidePage (ExtensionSidePage):
         return res
         
     def _load_window_themes_old(self):
-        dirs = ("/usr/share/themes", os.path.join(os.path.expanduser("~"), ".themes"))
+        dirs = ("/usr/share/themes", os.path.join(HOME_PATH, ".themes"))
         valid = walk_directories(dirs, lambda d: os.path.exists(os.path.join(d, "metacity-1")))
         #valid.sort(lambda a,b: cmp(a.lower(), b.lower()))
         sortVal(valid)

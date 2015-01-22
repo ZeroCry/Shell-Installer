@@ -110,6 +110,7 @@ class ControlWindow(object):
         self.details = False#Que es esto kit
         self.transaction_done = True#Que es esto pac update after install
         self.tag_count = 0
+        self.not_close_on_finished = False
 
     def set_transaction(self, transaction):
         self.disconnect_all_signals()
@@ -127,13 +128,17 @@ class ControlWindow(object):
         else:
             pass #we need to destroy the terminal
 
+    def set_not_close_on_finished(self):
+        self.not_close_on_finished = True
+
     def restar_window(self):
         self.mainApp._terminalTextBuffer.delete(self.mainApp._terminalTextBuffer.get_start_iter(),
                                                 self.mainApp._terminalTextBuffer.get_end_iter())
         self.mainApp._cancelButton.set_visible(False)
         self.mainApp._closeButton.set_visible(False)
         self.mainApp._actionImage.set_from_icon_name("cinnamon-installer-setup", Gtk.IconSize.BUTTON)
-        self.mainApp._terminalExpander.set_visible(True)
+        self.mainApp._terminalExpander.set_sensitive(True)
+        self.mainApp._terminalExpander.set_expanded(False)
         self.mainApp._statusLabel.set_text(_("Preparing")+"...")
         self.mainApp._roleLabel.set_text(_("Preparing")+"...")
         self.mainApp._progressBar.set_text("")
@@ -216,7 +221,7 @@ class ControlWindow(object):
 
     def _data_progress(self, column, cell, model, iter, data):
         try:
-            progress = model.get_value(iter, 0)
+            progress = model.get_value(iter, 1)
             if progress == -1:
                 cell.props.pulse = progress
             else:
@@ -263,11 +268,21 @@ class ControlWindow(object):
         self.mainApp.show()
 
     def exiting(self, msg):
+        self.exec_percent(100)
+        self.exec_target("100%")
         self.transaction_done = True
         self.trans.cancel()
-        self.mainApp.hide()
+        self.mainApp._roleLabel.set_markup("<big><b>%s</b></big>" % _("Finished"))
+        self.mainApp._statusLabel.set_markup(CI_STATUS["FINISHED"])
+        self.mainApp._terminalExpander.set_expanded(self.not_close_on_finished)
+        self.mainApp._cancelButton.set_visible(False)
+        self.mainApp._closeButton.set_visible(self.not_close_on_finished)
+        self.mainApp._terminalExpander.set_sensitive(self.not_close_on_finished)
+        if not self.not_close_on_finished:
+            self.mainApp.hide()
+            self.mainApp.exit()
+        self.not_close_on_finished = False
         print(msg)
-        self.mainApp.exit()
 
     def handler_confirm_deps(self, service, conf_info):
         GObject.idle_add(self.exec_confirm_deps, conf_info)
@@ -283,10 +298,10 @@ class ControlWindow(object):
 
     def handler_transaction_start(self, service, message):
         GObject.idle_add(self.exec_transaction_start, message)
-        time.sleep(0.1)
+        time.sleep(0.05)
 
-    def handler_reply(self, service, message):
-        GObject.idle_add(self.exec_reply, message)
+    def handler_transaction_done(self, service, message):
+        GObject.idle_add(self.exec_transaction_done, message)
         time.sleep(0.1)
 
     def handler_transaction_error(self, service, title, message):
@@ -329,8 +344,8 @@ class ControlWindow(object):
         GObject.idle_add(self.exec_start_childs, restar_all)
         time.sleep(0.1)
 
-    def handler_percent_childs(self, service, id, name, percent, details):
-        GObject.idle_add(self.exec_percent_childs, id, name, percent, details)
+    def handler_percent_childs(self, service, id, img, name, percent, details):
+        GObject.idle_add(self.exec_percent_childs, id, img, name, percent, details)
         time.sleep(0.1)
 
     def handler_terminal_attached(self, service, attached):
@@ -374,14 +389,28 @@ class ControlWindow(object):
 
     def exec_transaction_start(self, message):
         self.mainApp._cancelButton.hide()
+        self.mainApp._terminalExpander.set_sensitive(True)
+        self.mainApp._downloadScrolled.hide()
+        if self.terminal:
+            self.terminal.show()
+            self.mainApp._terminalTextView.hide()
+        else:
+            self.mainApp._terminalTextView.show()
 
-    def exec_reply(self, message):
+    def exec_transaction_done(self, message):
         end_iter = self.mainApp._terminalTextBuffer.get_end_iter()
         self.mainApp._terminalTextBuffer.insert(end_iter, str(message))
         self.exiting("")
 
     def exec_transaction_error(self, title, message):
         self.mainApp.show_error(title, message)
+        if self.terminal:
+            self.terminal.show()
+            self.mainApp._terminalTextView.hide()
+        else:
+            self.mainApp._terminalTextView.show()
+        self.mainApp._terminalExpander.set_expanded(True)
+        self.not_close_on_finished = True
         self.exiting("")
 
     def exec_status(self, status, translation):
@@ -392,30 +421,25 @@ class ControlWindow(object):
         else:
             self.mainApp._statusLabel.set_markup(CI_STATUS["UNKNOWN"])
         if status in ("DOWNLOADING", "DOWNLOADING_REPO"):
-            self.mainApp._terminalExpander.set_sensitive(True)
             self.mainApp._downloadScrolled.show()
             self.mainApp._terminalTextView.hide()
             if self.terminal:
                 self.terminal.hide()
-        elif status == "COMMITTING":
-            self.mainApp._downloadScrolled.hide()
+        elif status == "DETAILS":
             if self.terminal:
                 self.terminal.show()
-                self.mainApp._terminalExpander.set_sensitive(True)
+                self.mainApp._terminalTextView.hide()
             else:
                 self.mainApp._terminalTextView.show()
-                self.mainApp._terminalExpander.set_expanded(False)
-                self.mainApp._terminalExpander.set_sensitive(False) #commented spices
-        elif status == "DETAILS":
-            return
+            self.not_close_on_finished = True
+            self.mainApp._terminalExpander.set_expanded(True)
         else:
             self.mainApp._downloadScrolled.hide()
             if self.terminal:
-                self.terminal.hide()
+                self.terminal.show()
+                self.mainApp._terminalTextView.hide()
             else:
                 self.mainApp._terminalTextView.show()
-            self.mainApp._terminalExpander.set_sensitive(False) #commented spices
-            self.mainApp._terminalExpander.set_expanded(False)
 
     def exec_role(self, role_translate):
         end_iter = self.mainApp._terminalTextBuffer.get_end_iter()
@@ -440,8 +464,13 @@ class ControlWindow(object):
         self.mainApp._progressBar.set_text(text)
 
     def exec_need_details(self, need):
+        if self.terminal:
+            self.terminal.show()
+            self.mainApp._terminalTextView.hide()
+        else:
+            self.mainApp._terminalTextView.show()
         self.mainApp._terminalExpander.set_expanded(need)
-        self.details = need;
+        self.not_close_on_finished = need
 
     def exec_updates(self, syncfirst=True, updates=None):
         #syncfirst, updates = update_data
@@ -455,13 +484,14 @@ class ControlWindow(object):
                 self.exiting("")
 
     def exec_cancellable_changed(self, cancellable):
+        self.mainApp._cancelButton.set_visible(True)
         self.mainApp._cancelButton.set_sensitive(cancellable)
 
     def exec_start_childs(self, restar_all):
         self.mainApp._downloadTreeView.get_model().clear()
         self._download_map = {}
 
-    def exec_percent_childs(self, id, name, percent, details):
+    def exec_percent_childs(self, id, img, name, percent, details):
         model = self.mainApp._downloadTreeView.get_model()
         if percent > 100:
             percent = 100
@@ -471,7 +501,7 @@ class ControlWindow(object):
             adj = self.mainApp._downloadTreeView.get_vadjustment()
             is_scrolled_down = (adj.get_value() + adj.get_page_size() ==
                                 adj.get_upper())
-            iter = model.append((percent, name, details, id))
+            iter = model.append((img, percent, name, details, id))
             self._download_map[id] = iter
             if is_scrolled_down:
                 # If the treeview was scrolled to the end, do this again
@@ -479,9 +509,11 @@ class ControlWindow(object):
                 self.mainApp._downloadTreeView.scroll_to_cell(model.get_path(iter),
                     None, False, False, False)
         else:
-            model.set_value(iter, 0, percent)
-            model.set_value(iter, 1, name)
-            model.set_value(iter, 2, details)
+            if not model.get_value(iter, 0) == img:
+                model.set_value(iter, 0, img)
+            model.set_value(iter, 1, percent)
+            model.set_value(iter, 2, name)
+            model.set_value(iter, 3, details)
 
     def exec_terminal_attached(self, attached):
         if attached and self.terminal:
@@ -506,8 +538,15 @@ class ControlWindow(object):
         tag_default = Gtk.TextTag.new(name)
         tag_default.set_properties(background="red")
         tags.add(tag_default)
-        self._insert_tagged_text(end_iter, textbuffer, msg, name)
+        self._insert_tagged_text(end_iter, textbuffer, msg + "\n", name)
         self.tag_count += 1
+        if self.terminal:
+            self.terminal.show()
+            self.mainApp._terminalTextView.hide()
+        else:
+            self.mainApp._terminalTextView.show()
+        self.mainApp._terminalExpander.set_expanded(True)
+        self.not_close_on_finished = True
 
     def exec_log_warning(self, msg):
         textbuffer = self.mainApp._terminalTextBuffer
@@ -613,7 +652,7 @@ class ControlWindow(object):
     def connect_all_signals(self):
         if self.trans:
             self.trans.connect("EmitTransactionConfirmation", self.handler_confirm_deps)
-            self.trans.connect("EmitTransactionDone", self.handler_reply)
+            self.trans.connect("EmitTransactionDone", self.handler_transaction_done)
             self.trans.connect("EmitTransactionError", self.handler_transaction_error)
             self.trans.connect("EmitTransactionCancellable", self.handler_cancellable_changed)
             self.trans.connect("EmitTransactionStart", self.handler_transaction_start)
@@ -646,7 +685,7 @@ class ControlWindow(object):
         self.percent_handler(None, 0)
         self.mainApp._cancelButton.set_visible(False)
         self.mainApp._closeButton.set_visible(False)
-        self.mainApp._terminalExpander.set_visible(False)
+        self.mainApp._terminalExpander.set_sensitive(False)
         self.mainApp.show()
         self.trans.checkUpdates()
 
@@ -658,7 +697,7 @@ class ControlWindow(object):
         self.percent_handler(None, 0)
         self.mainApp._cancelButton.set_visible(True)
         self.mainApp._closeButton.set_visible(False)
-        self.mainApp._terminalExpander.set_visible(True)
+        self.mainApp._terminalExpander.set_sensitive(True)
         self.mainApp.show()
         self.trans.Refresh(force_update)
 
@@ -670,7 +709,7 @@ class ControlWindow(object):
         self.mainApp._terminalTextBuffer.delete(self.mainApp._terminalTextBuffer.get_start_iter(), self.mainApp._terminalTextBuffer.get_end_iter())
         self.mainApp._cancelButton.set_visible(False)
         self.mainApp._closeButton.set_visible(False)
-        self.mainApp._terminalExpander.set_visible(True)
+        self.mainApp._terminalExpander.set_sensitive(True)
         self.mainApp.show()
         self.mainApp._cancelButton.set_visible(True)
         time.sleep(0.1)
@@ -693,7 +732,7 @@ class ControlWindow(object):
             self.action_long_handler(None, action+"\n")
             self.mainApp._cancelButton.set_visible(True)
             self.mainApp._closeButton.set_visible(False)
-            self.mainApp._terminalExpander.set_visible(True)
+            self.mainApp._terminalExpander.set_sensitive(True)
             self.mainApp._terminalExpander.set_expanded(True)
             self.trans.build_proc(path)
             time.sleep(0.1)

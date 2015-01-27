@@ -14,11 +14,12 @@ A GUI Packages Manager writing in python, with the ability to support all distro
 
 Install and remove:
 --------------
-1- Download the program from the [website](https://github.com/lestcape/Cinnamon-Installer/archive/6ea565662fba7f8a9a5ac3d5e441c0b63ae5c239.zip)
-2- Unzip the program
-3- Give execute permissions to the setup.py file located in the tools folder.
+- Download the program from the [website](https://github.com/lestcape/Cinnamon-Installer/archive/6ea565662fba7f8a9a5ac3d5e441c0b63ae5c239.zip)
+- Unzip the program
+- Give execute permissions to the setup.py file located in the tools folder.
 
 To install: execute on a terminal: setup.py -i
+
 To remove: execute on a terminal: setup.py -u
 
 The idea

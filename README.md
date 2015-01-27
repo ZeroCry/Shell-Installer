@@ -12,6 +12,17 @@ Manjaro users and developers they have given their support to make this project 
 
 A GUI Packages Manager writing in python, with the ability to support all distros, where you can install Cinnamon desktop.
 
+Install and remove:
+--------------
+1- Download the program from the [website](https://github.com/lestcape/Cinnamon-Installer/archive/6ea565662fba7f8a9a5ac3d5e441c0b63ae5c239.zip)
+2- Unzip the program
+3- Give execute permissions to the setup.py file located in the tools folder.
+
+To install: execute on a terminal: setup.py -i
+To remove: execute on a terminal: setup.py -u
+
+The idea
+--------------
 The idea it's allow have an installer and uninstaller, but with the ability to support all
 distros, where Cinnamon desktop can be installed. The intention it's not break the current
 Cinnamon functionality, not replace, copy or move any code of Cinnamon. It's make more 

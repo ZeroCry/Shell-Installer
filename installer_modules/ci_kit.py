@@ -244,7 +244,7 @@ class InstallerService(GObject.GObject):
     def release_all(self):
         pass
 
-    def load_cache(self, forced=False, async=False, collect_type=None):
+    def load_cache(self, forced=False, collect_type=None):
         pass
 
     def have_cache(self, collect_type=None):
@@ -293,15 +293,32 @@ class InstallerService(GObject.GObject):
         loop.quit()
 
     def get_all_remote_packages(self, loop, result, collect_type=None):
-        local_packages = []
-        result.append(local_packages)
+        remote_packages = []
+        result.append(remote_packages)
         try:
             resultP = self.client.get_packages(packagekit.FilterEnum.NOT_INSTALLED, None, self._progress_pcb, None);
             pkgs = resultP.get_package_array()
             if pkgs:
                 for pkg in pkgs:
-                    if (not (pkg.get_name() in local_packages)):
-                        local_packages.append(pkg.get_name())
+                    if (not (pkg.get_name() in remote_packages)):
+                        remote_packages.append(pkg.get_name())
+        except GLib.GError:
+            e = sys.exc_info()[1]
+            error = format_error(e.args)
+            print("error " + str(error))
+        sleep(0.1)
+        loop.quit()
+
+    def get_all_packages(self, loop, result, collect_type=None):
+        all_packages = []
+        result.append(all_packages)
+        try:
+            resultP = self.client.get_packages(packagekit.FilterEnum.NONE, None, self._progress_pcb, None);
+            pkgs = resultP.get_package_array()
+            if pkgs:
+                for pkg in pkgs:
+                    if (not (pkg.get_name() in all_packages)):
+                        all_packages.append(pkg.get_name())
         except GLib.GError:
             e = sys.exc_info()[1]
             error = format_error(e.args)

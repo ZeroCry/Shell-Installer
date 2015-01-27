@@ -46,7 +46,6 @@ try:
     import dbus
     import cgi
     import subprocess
-    import datetime
     from functools import cmp_to_key
 except Exception:
     e = sys.exc_info()[1]
@@ -71,6 +70,17 @@ SETTING_TYPE_NONE = 0
 SETTING_TYPE_INTERNAL = 1
 SETTING_TYPE_EXTERNAL = 2
 
+MARK_NONE = 0
+MARK_INSTALL = 1
+MARK_REINSTALL = 2
+MARK_UPDATE = 3
+MARK_REMOVE = 4
+
+#"install",
+#"reinstall",
+#"update",
+#"remove"
+
 ROW_SIZE = 32
 
 class SurfaceWrapper:
@@ -88,7 +98,7 @@ class ExtensionSidePage (SidePage):
         SidePage.__init__(self, name, icon, keywords, content_box, -1, module=module)
         self.collection_type = collection_type
         self.themes = collection_type == "theme"
-        self.icons = []
+        #self.icons = []
         self.run_once = False
         # Find the enabled extensions
         if not self.themes:
@@ -102,7 +112,6 @@ class ExtensionSidePage (SidePage):
         self.model = None
         self.treeview = None
         self.last_col_selected = None
-        self.progress_window = None
         self.extensions_is_loading = False
         self.extensions_is_loaded = False
         self.spicesData = None
@@ -110,18 +119,14 @@ class ExtensionSidePage (SidePage):
         self.enable_render = True
 
     def set_all_cell_data_func(self):
-        #self.column1.set_cell_data_func(cr, self.celldatafunction_checkbox)
-        #self.column2.set_cell_data_func(cr, self.icon_cell_data_func, 4)
-        #self.column5.set_cell_data_func(cr, self.installed_cell_data_func)
-        #self.column6.set_cell_data_func(cr, self.available_cell_data_func)
-        self.isActiveColumn.set_cell_data_func(cr, self._is_active_data_func)
+        self.column1.set_cell_data_func(cr, self._checked_data_func)
+        self.column2.set_cell_data_func(cr, self._icon_data_func)
+        self.column7.set_cell_data_func(cr, self._is_active_data_func)
 
     def remove_all_cell_data_func(self):
         self.column1.set_cell_data_func(cr, None)
-        self.column2.set_cell_data_func(cr, None, 4)
-        self.column5.set_cell_data_func(cr, None)
-        self.column6.set_cell_data_func(cr, None)
-        self.isActiveColumn.set_cell_data_func(cr, None)
+        self.column2.set_cell_data_func(cr, None)
+        self.column7.set_cell_data_func(cr, None)
 
     def load(self, window=None):
         if window is not None:
@@ -131,47 +136,72 @@ class ExtensionSidePage (SidePage):
         self._proxy = None
         self.extra_page = None
         self._signals = []
+        packages_details_paned = Gtk.Paned.new(Gtk.Orientation.VERTICAL)
+        packages_details_paned.expand = True
 
-        self.progress_window = self.builder.get_object("progress_window")
-        self.progresslabel = self.builder.get_object("progresslabel")
-        self.progressbar = self.builder.get_object("progressbar")
-        self.progress_button_abort = self.builder.get_object("btnProgressAbort")
-        self.package_details = self.builder.get_object("package_details")
+        #packages_details_paned.set_position(self.content_box.height/80)
+        packages_details_paned.set_size_request(-1, 430)
+        packages_details_paned.set_position(320)
+
+        # packages
+        extensions_vbox = Gtk.VBox()
+        packages_details_paned.add1(extensions_vbox)
+
+        # get info
+        self.package_details = Gtk.Notebook()
+        packages_details_paned.add2(self.package_details)
+
+        infos_scrolledwindow = Gtk.ScrolledWindow()
+        info_main_box = Gtk.VBox()
+        infos_scrolledwindow.add(info_main_box)
+        self.package_details.append_page(infos_scrolledwindow, Gtk.Label.new(_("Infos")))
+
+        info_img_box = Gtk.HBox()
+        info_desc_box = Gtk.HBox()
+        self.desc_label = Gtk.Label()
+        info_desc_box.pack_start(self.desc_label, False, False, 10)
+        info_main_box.pack_start(info_img_box, False, False, 2)
+        info_main_box.pack_start(info_desc_box, False, False, 4)
+
+        self.info_image = Gtk.Image()
+        info_text_box = Gtk.VBox()
+        info_img_box.pack_start(self.info_image, False, False, 10)
+        info_img_box.pack_start(info_text_box, False, False, 2)
+
+        self.name_label = Gtk.Label()
+        self.vers_label = Gtk.Label()
+        self.webs_label = Gtk.Label()
+        self.name_label.set_alignment(xalign=0.0, yalign=0.5)
+        self.vers_label.set_alignment(xalign=0.0, yalign=0.5)
+        self.webs_label.set_alignment(xalign=0.0, yalign=0.5)
+        info_text_box.pack_start(self.name_label, False, False, 0)
+        info_text_box.pack_start(self.vers_label, False, False, 0)
+        info_text_box.pack_start(self.webs_label, False, False, 0)
+
         self.package_details.connect_after("switch-page", self.on_change_current_page)
 
-        self.name_label = self.builder.get_object("name_label")
-        self.desc_label = self.builder.get_object("desc_label")
-        self.vers_label = self.builder.get_object("vers_label")
-        self.webs_label = self.builder.get_object("webs_label")
-        self.info_image = self.builder.get_object("info_image")
-
         self.about_dialog = self.builder.get_object("AboutDialog")
-        self.settings_menuitem = self.builder.get_object("settings_menuitem")
+
+        # principal menu
         self.about_menuitem = self.builder.get_object("about_menuitem")
+        self.settings_menuitem = self.builder.get_object("settings_menuitem")
 
-        #self.settings_menuitem.connect("activate", self.on_general_settings_clicked)
-        #self.about_menuitem.connect("activate", self.on_about_clicked)
-
+        # general settings
         self.general_settings_scroll = self.builder.get_object("general_settings_scroll")
-        self.integrate_checkbutton = self.builder.get_object("integrate_checkbutton")
 
-        if os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py"):
-            self.integrate_checkbutton.set_active(True)
-        else:
-            self.integrate_checkbutton.set_active(False)
-        #self.integrate_checkbutton.connect("toggled", self.on_integrate_toggled)
+        #colors
+        self.installed_color = self.builder.get_object("installed_colorbutton")
+        self.reinstalled_color = self.builder.get_object("reinstalled_colorbutton")
+        self.removed_color = self.builder.get_object("removed_colorbutton")
+        self.updated_color = self.builder.get_object("updated_colorbutton")
 
-        scrolledWindow = Gtk.ScrolledWindow()   
-        scrolledWindow.set_shadow_type(Gtk.ShadowType.ETCHED_IN)   
-        scrolledWindow.set_border_width(6)
-        extensions_vbox = Gtk.VBox()
+        scrolledWindow = Gtk.ScrolledWindow()
+        scrolledWindow.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
 
         self.search_entry = self.builder.get_object("search_entry")
         self.search_entry.set_placeholder_text(_("Search"))
 
-
-        self.add_widget(extensions_vbox)
-        extensions_vbox.expand = True
+        self.add_widget(packages_details_paned)
 
         self.treeview = Gtk.TreeView()
         self.treeview.set_rules_hint(True)
@@ -181,58 +211,52 @@ class ExtensionSidePage (SidePage):
         cr.connect("toggled", self.check_toggled, self.treeview)
         self.column1 = Gtk.TreeViewColumn(_("Act."), cr)
         self.column1.set_clickable(True)
-        self.column1.set_cell_data_func(cr, self.celldatafunction_checkbox)
-        self.column1.connect("clicked", self.on_column_clicked)
+        self.column1.set_cell_data_func(cr, self._checked_data_func)
+        self.column1.connect("clicked", self._on_column_clicked)
 
         cr = Gtk.CellRendererPixbuf()
-        self.column2 = Gtk.TreeViewColumn(_("Icon"), cr)
+        self.column2 = Gtk.TreeViewColumn(_("Icon"), cr)#, pixbuf=11
         self.column2.set_min_width(50)
         self.column2.set_clickable(True)
-        self.column2.set_cell_data_func(cr, self.icon_cell_data_func, 4)
-        self.column2.connect("clicked", self.on_column_clicked)
+        self.column2.set_cell_data_func(cr, self._icon_data_func)
+        self.column2.connect("clicked", self._on_column_clicked)
 
         cr = Gtk.CellRendererText()
-        self.column3 = Gtk.TreeViewColumn(_("Name"), cr, markup=1, background=17)
+        self.column3 = Gtk.TreeViewColumn(_("Name"), cr, markup=1, background=7)
         self.column3.set_expand(True)
         self.column3.set_clickable(True)
-        self.column3.connect("clicked", self.on_column_clicked)
+        self.column3.connect("clicked", self._on_column_clicked)
 
         cr.set_property("wrap-mode", Pango.WrapMode.WORD_CHAR)
         cr.set_property("wrap-width", 160)
 
         cr = Gtk.CellRendererText()
         cr.set_property("xalign", 1.0)
-        self.column4 = Gtk.TreeViewColumn("Score", cr, markup=14, background=17)
+        self.column4 = Gtk.TreeViewColumn("Score", cr, markup=8, background=7)
         self.column4.set_alignment(1.0)
         self.column4.set_clickable(True)
-        #self.column4.set_expand(True)
-        self.column4.connect("clicked", self.on_column_clicked)
+        self.column4.connect("clicked", self._on_column_clicked)
 
         cr = Gtk.CellRendererText()
         cr.set_property("xalign", 1.0)
-        self.column5 = Gtk.TreeViewColumn(_("Installed"), cr, background=17)
+        self.column5 = Gtk.TreeViewColumn(_("Installed"), cr, markup=9, background=7)
         self.column5.set_alignment(1.0)
-        #self.column5.set_expand(True)
         self.column5.set_clickable(True)
-        self.column5.set_cell_data_func(cr, self.installed_cell_data_func)
-        self.column5.connect("clicked", self.on_column_clicked)
+        self.column5.connect("clicked", self._on_column_clicked)
 
         cr = Gtk.CellRendererText()
         cr.set_property("xalign", 1.0)
-        self.column6 = Gtk.TreeViewColumn(_("Available"), cr, background=17)
+        self.column6 = Gtk.TreeViewColumn(_("Available"), cr, markup=10, background=7)
         self.column6.set_alignment(1.0)
         self.column6.set_clickable(True)
-        #self.column6.set_expand(True)
-        self.column6.set_cell_data_func(cr, self.available_cell_data_func)
-        self.column6.connect("clicked", self.on_column_clicked)
+        self.column6.connect("clicked", self._on_column_clicked)
 
         cr = Gtk.CellRendererPixbuf()
         cr.set_property("stock-size", Gtk.IconSize.DND)
-        self.isActiveColumn = Gtk.TreeViewColumn(_("Status"), cr, icon_name=11)
-        #self.isActiveColumn.set_expand(True)
-        self.isActiveColumn.set_clickable(True)
-        self.isActiveColumn.set_cell_data_func(cr, self._is_active_data_func)
-        self.isActiveColumn.connect("clicked", self.on_column_clicked)
+        self.column7 = Gtk.TreeViewColumn(_("Status"), cr, icon_name=5)
+        self.column7.set_clickable(True)
+        self.column7.set_cell_data_func(cr, self._is_active_data_func)
+        self.column7.connect("clicked", self._on_column_clicked)
 
         self.treeview.append_column(self.column1)
         self.treeview.append_column(self.column2)
@@ -240,41 +264,36 @@ class ExtensionSidePage (SidePage):
         self.treeview.append_column(self.column4)
         self.treeview.append_column(self.column5)
         self.treeview.append_column(self.column6)
-        self.treeview.append_column(self.isActiveColumn)
+        self.treeview.append_column(self.column7)
 
         self.treeview.set_headers_visible(True)
         if not self.extensions_is_loading and not self.extensions_is_loaded:
             if not self.model:
-                #self.model = Gtk.TreeStore(str, str, int, int, str, str, int, bool, str, int, str, str, str, int, int, int, int, str, object)
+                #self.model = Gtk.TreeStore(str, str, int, int, str, str, int, bool, str, int, str, str, str, int, int, int, int, str, object, object)
                 #                          uuid, desc, enabled, max-instances, icon, name, read-only, hide-config-button, ext-setting-app, edit-date, read-only icon, active icon, schema file name (for uninstall), settings type, score, markinstall, installed_date, color
 
                 #self.modelfilter = self.model.filter_new()
-                #self.modelfilter.set_visible_func(self.only_active)
+                #self.modelfilter.set_visible_func(self._only_active)
                 #self.treeview.set_model(self.modelfilter)
-                self.load_extensions()
+                self.load_extensions(False, False)
             else:
                 self.on_load_extensions_finished()
 
         self.showFilter = SHOW_ALL
 
-        self.treeview.connect("button_press_event", self.on_button_press_event)
-        self.treeview.connect("button_release_event", self.on_button_release_event)
-        self.treeview.connect("query-tooltip", self.on_treeview_query_tooltip)
+        self.treeview.connect("button_press_event", self._on_button_press_event)
+        self.treeview.connect("button_release_event", self._on_button_release_event)
+        self.treeview.connect("query-tooltip", self._on_treeview_query_tooltip)
         #self.treeview.get_selection().connect("changed", lambda x: self._selection_changed())
-        self.treeview.connect("motion_notify_event", self._on_motion_notify_event)
         if self.themes:
-            self.treeview.connect("row-activated", self.on_row_activated)
-
-        self.treeview.set_search_column(5)
-        x =  Gtk.Tooltip()
-        x.set_text("test")
-        #self.treeview.set_tooltip_cell(x, None, self.isActiveColumn, None)
+            self.treeview.connect("row-activated", self._on_row_activated)
+        self.treeview.set_search_column(3)
         self.treeview.set_search_entry(self.search_entry)           
 
         scrolledWindow.add(self.treeview)
 
         self.instanceButton = self.builder.get_object("xlet_add")
-
+        self.instanceButton.set_label(_("Add"))
         self.instanceButton.set_sensitive(False)
 
         self.configureButton = self.builder.get_object("xlet_configure")
@@ -286,6 +305,7 @@ class ExtensionSidePage (SidePage):
         self.back_to_list_button = self.builder.get_object("back_to_list")
 
         self.restoreButton = self.builder.get_object("xlet_restore")
+        self.restoreButton.set_label(_("Restore"))
 
         self.category_settings_scroll = self.builder.get_object("category_settings_scroll")
         self.category_settings_box = self.builder.get_object("category_settings_box")
@@ -323,7 +343,7 @@ class ExtensionSidePage (SidePage):
             self.store_filter.append([_("Installed"), "cs-xlet-installed", SHOW_INSTALLED, self.collection_type])
             self.store_filter.append([_("Online"), "cs-xlet-update", SHOW_ONLINE, self.collection_type])
             self.store_filter.append([_("Active"), "cs-xlet-running", SHOW_ACTIVE, self.collection_type])
-            self.store_filter.append([_("Inactive"), "cs-xlet-error", SHOW_INACTIVE, self.collection_type])
+            self.store_filter.append([_("Inactive"), "cs-xlet-inactive", SHOW_INACTIVE, self.collection_type])
             self.store_filter.append([_("Settings"), "cs-xlet-prefs", SHOW_SETTINGS, self.collection_type])
 
         extensions_vbox.pack_start(scrolledWindow, True, True, 0)
@@ -335,8 +355,8 @@ class ExtensionSidePage (SidePage):
 
         self.install_button = self.builder.get_object("xlet_install")
         #self.install_button.set_label(_("Install or update selected items"))
-        self.install_button.set_label(_("Ok"))
-        self.install_button.set_tooltip_text(_("Install or update selected items"))
+        self.install_button.set_label(_("Apply"))
+        self.install_button.set_tooltip_text(_("Apply all selected changes"))
 
         #self.select_updated = self.builder.get_object("xlet_update")
         self.select_updated = self.package_details.get_action_widget(Gtk.PackType.END)
@@ -356,8 +376,9 @@ class ExtensionSidePage (SidePage):
         self.reload_button.set_label(_("Update"))
         self.reload_button.set_tooltip_text(_("Refresh list"))
 
-        self.install_list = []
-        self.update_list = {}
+        self.install_list = {}
+        self.install_button.set_sensitive(False)
+        self.update_list = []
         self.current_num_updates = 0
 
         # if not self.spices.get_webkit_enabled(self.collection_type):
@@ -392,40 +413,25 @@ class ExtensionSidePage (SidePage):
         if response == Gtk.ResponseType.DELETE_EVENT or response == Gtk.ResponseType.CANCEL:
             self.about_dialog.hide()
 
-    def on_integrate_toggled(self, menuitem):
-        have_module = os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py")
-        if (self.integrate_checkbutton.get_active()):
-            if not have_module:
-                setup = os.path.join(DIR_PATH, "tools/setup.py")
-                p = subprocess.call([setup, "-m"])
-                if not os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py"):
-                    self.integrate_checkbutton.set_active(False)   
-        else:
-            if have_module:
-                setup = os.path.join(DIR_PATH, "tools/setup.py")
-                p = subprocess.call([setup, "-d"])
-                if os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py"):
-                    self.integrate_checkbutton.set_active(True)
-
-    def on_column_clicked(self, column):
+    def _on_column_clicked(self, column):#fixme
         list_col = self.treeview.get_columns()
         for col in list_col:
             col.set_sort_indicator(False)
         self.last_col_selected
         if column == self.column1:
-            self.change_column_state(column, 15)
+            self.change_column_state(column, 7)
         if column == self.column2:
-            self.change_column_state(column, 4)
+            self.change_column_state(column, 8)
         if column == self.column3:
-            self.change_column_state(column, 5)
+            self.change_column_state(column, 3)
         if column == self.column4:
-            self.change_column_state(column, 14)
+            self.change_column_state(column, 8)
         if column == self.column5:
             self.change_column_state(column, 9)
         if column == self.column6:
-            self.change_column_state(column, 16)
-        if column == self.isActiveColumn:
-            self.change_column_state(column, 15)#11
+            self.change_column_state(column, 10)
+        if column == self.column7:
+            self.change_column_state(column, 5)
 
     def change_column_state(self, column, pos):
         if self.last_col_selected:
@@ -460,7 +466,7 @@ class ExtensionSidePage (SidePage):
                     name = unicode(fl.name, "utf-8")
                     if len(name) > 30:
                         name = "%s..." % name[:30]
-                    self.store_filter.append([name, fl.icon, fl])
+                    self.store_filter.append([name, fl.icon, fl, self.collection_type])
         self.min_label_length = 0
         self.min_pix_length = 0
         #self.validate_label_space(self.store_filter)
@@ -532,7 +538,7 @@ class ExtensionSidePage (SidePage):
            self.category_settings_scroll.hide()
            self.packages_box.show_all()
 
-    def set_select_filter(self, filter_select):
+    def _set_select_filter(self, filter_select):
         if self.filter_iconview:
             iter = self.store_filter.get_iter_first()
             while iter is not None:
@@ -551,50 +557,44 @@ class ExtensionSidePage (SidePage):
 
     def reload_extension(self): #Possible, we need to do that externally when we have different client modules?
         self.connect_handlers()
-        self._selection_changed()
-        self.clear_all_information()
-        self.refresh_update_button()
         self.filter_iconview.set_model(self.store_filter)
         if self.collection_type == "applet":
             self.instanceButton.set_tooltip_text(_("Add to panel"))
+            self.restoreButton.set_tooltip_text(_("Restore default theme"))
         elif self.collection_type == "desklet":
             self.instanceButton.set_tooltip_text(_("Add to desktop"))
+            self.restoreButton.set_tooltip_text(_("Restore default theme"))
         elif self.collection_type == "extension":
             self.instanceButton.set_tooltip_text(_("Add to Cinnamon"))
+            self.restoreButton.set_tooltip_text(_("Restore default theme"))
         elif self.collection_type == "theme":
             self.instanceButton.set_tooltip_text(_("Apply theme"))
-        else:
-            self.instanceButton.set_tooltip_text(_("Add"))
-        self.instanceButton.set_label(_("Add"))
-        if not self.themes:
             self.restoreButton.set_tooltip_text(_("Restore to default"))
         else:
+            self.instanceButton.set_tooltip_text(_("Add"))
             self.restoreButton.set_tooltip_text(_("Restore default theme"))
-        self.restoreButton.set_label(_("Restore"))
-
         if self.extra_page and not self.extra_page.get_parent():
            self.category_settings_box.pack_start(self.extra_page, True, True, 0)
         self.category_settings_scroll.hide()
         self.packages_box.show_all()
-        if self.modelfilter:
+        if self.extensions_is_loaded:
             self.modelfilter.refilter()
-        GObject.idle_add(self.set_select_filter, 0)
-        #self.set_select_filter(0) #bug on pix
+        GObject.idle_add(self._set_select_filter, SHOW_ALL)
+        #self._set_select_filter(SHOW_ALL) #bug on pix
 
     def connect_handlers(self):
         self.instanceButton.connect("clicked", lambda x: self._add_another_instance())
         self.configureButton.connect("clicked", self._configure_extension)
         self.extConfigureButton.connect("clicked", self._external_configure_launch)
         self.restoreButton.connect("clicked", lambda x: self._restore_default_extensions())
-        self.reload_button.connect("clicked", lambda x: self.load_extensions(True))
-        self.install_button.connect("clicked", lambda x: self._install_extensions(self.install_list))
+        self.reload_button.connect("clicked", lambda x: self.load_extensions(True, True))
+        self.install_button.connect("clicked", lambda x: self._install_extensions())
         self.select_updated.connect("clicked", lambda x: self.select_updated_extensions())
         self.search_entry.connect("changed", self.on_entry_refilter)
         self.filter_iconview.connect("item-activated", self.side_view_nav)
         self.filter_iconview.connect("button-release-event", self.filter_button_press)
         self.settings_menuitem.connect("activate", self.on_general_settings_clicked)
         self.about_menuitem.connect("activate", self.on_about_clicked)
-        self.integrate_checkbutton.connect("toggled", self.on_integrate_toggled)
 
     def disconnect_handlers(self):
         GObject.signal_handlers_destroy(self.instanceButton)
@@ -608,7 +608,9 @@ class ExtensionSidePage (SidePage):
         GObject.signal_handlers_destroy(self.filter_iconview)
         GObject.signal_handlers_destroy(self.settings_menuitem)
         GObject.signal_handlers_destroy(self.about_menuitem)
-        GObject.signal_handlers_destroy(self.integrate_checkbutton)
+
+    def getAdditionalPage(self):
+        return None
 
     def refresh_running_uuids(self):
         try:
@@ -658,23 +660,26 @@ class ExtensionSidePage (SidePage):
                             self.extConfigureButton.clicked()
         if not found:
             self.back_to_list_button.clicked()
-            
 
-    def icon_cell_data_func(self, column, cell, model, iter, data=None):
+    def _checked_data_func(self, column, cell, model, iter, data=None):
         if self.enable_render:
-            checked = model.get_value(iter, 15)
-            if checked == 3:
-                cell.set_property("cell-background","yellow")
-            elif checked == 2:
-                cell.set_property("cell-background","red")
-            elif checked == -2:
-                cell.set_property("cell-background","green")
+            if model.get_value(iter, 4): #os.acess
+                cell.set_property("activatable", True)
             else:
-                cell.set_property("cell-background","white")
-            wrapper = model.get_value(iter, 18)
+                cell.set_property("activatable", False)
+            if model.get_value(iter, 7) != "white":
+                cell.set_property("active", True)
+            else:
+                cell.set_property("active", False)
+            cell.set_property("cell-background", model.get_value(iter, 7))
+
+    def _icon_data_func(self, column, cell, model, iter, data=None):
+        if self.enable_render:
+            cell.set_property("cell-background", model.get_value(iter, 7))
+            wrapper = model.get_value(iter, 11)
             if (not wrapper):
                 img = None
-                icon_extension = model.get_value(iter, 4)
+                icon_extension = model.get_value(iter, 12)["icon"]
                 if not self.themes:
                     w = ROW_SIZE + 5
                     h = ROW_SIZE + 5
@@ -700,173 +705,131 @@ class ExtensionSidePage (SidePage):
                             img = theme.load_icon("cs-%ss" % (self.collection_type), h, 0)
                 surface = Gdk.cairo_surface_create_from_pixbuf (img, self.window.get_scale_factor(), self.window.get_window())
                 wrapper = SurfaceWrapper(surface)
-                surface = model.set_value(iter, 18, wrapper)
+                model.set_value(iter, 11, wrapper)
             cell.set_property("surface", wrapper.surface)
 
-    def installed_cell_data_func(self, column, cell, model, iter, data=None):
+    def _is_active_data_func(self, column, cell, model, iter, data=None):
         if self.enable_render:
-            date_av = model.get_value(iter, 16)
-            date_int = model.get_value(iter, 9)
-            installed = model.get_value(iter, 15) > 0
-            if date_av > 0:
-                time = datetime.datetime.fromtimestamp(date_av).strftime("%Y-%m-%d\n%H:%M:%S")
-                cell.set_property("markup", time)
-            elif installed and date_int > 0:
-                time = datetime.datetime.fromtimestamp(date_int).strftime("%Y-%m-%d\n%H:%M:%S")
-                cell.set_property("markup", time)
-            else:
-                cell.set_property("markup", "")
+            cell.set_property("cell-background", model.get_value(iter, 7))
 
-    def available_cell_data_func(self, column, cell, model, iter, data=None):
-        if self.enable_render:
-            date_int = model.get_value(iter, 9)
-            if date_int > 0:
-                time = datetime.datetime.fromtimestamp(date_int).strftime("%Y-%m-%d\n%H:%M:%S")
-                cell.set_property("markup", "<span color='#0000FF'>%s</span>" % (time))
-            else:
-                cell.set_property("markup", "")
-
-    def getAdditionalPage(self):
-        return None
-
-    def on_treeview_query_tooltip(self, treeview, x, y, keyboard_mode, tooltip):
-        data = treeview.get_path_at_pos(x, y)
+    def _on_treeview_query_tooltip(self, treeview, x, y, keyboard_mode, tooltip): #fixme
+        data = treeview.get_path_at_pos(x, y-24) # The column title height
         if data:
-            path, column, x, y=data
+            path, column, x, y = data
             iter = self.modelfilter.get_iter(path)
-            if column.get_property("title") == _("Uninstall") and iter != None:
-                if not self.modelfilter.get_value(iter, 6):
-                    tooltip.set_text(_("Cannot be uninstalled"))
+            self.treeview.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.ARROW))
+            if column == self.column4:
+                tooltip.set_markup(_("Popularity"))
+                return True
+            elif column == self.column6:
+                if self.modelfilter.get_value(iter, 12)["spices-show"]:
+                    self.treeview.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.HAND2))
+                    tooltip.set_markup(_("More info"))
                     return True
-                else:
-                    return False
-            elif column.get_property("title") == _("Status") and iter != None:
-                can_update = self.modelfilter.get_value(iter, 16) < self.modelfilter.get_value(iter, 9)
-                if can_update:
-                    tooltip.set_text(_("Update available"))
+            elif column == self.column1 and iter != None:
+                tooltip.set_markup(_("Mark to"))
+            elif column == self.column7 and iter != None:
+                if not self.modelfilter.get_value(iter, 4): #"cs-xlet-system" in self.modelfilter.get_value(iter, 5):
+                    tooltip.set_markup(_("Cannot be uninstalled"))
+                    return True
+                is_installed = self.modelfilter.get_value(iter, 6)
+                if is_installed == 2:
+                    tooltip.set_markup(_("Update available"))
                     return True
                 count = self.modelfilter.get_value(iter, 2)
                 markup = ""
                 if count == 0:
-                    installed = self.modelfilter.get_value(iter, 15) > 0
-                    if installed:
-                        tooltip.set_text(_("Installed and up-to-date"))
+                    if is_installed:
+                        tooltip.set_markup(_("Installed and up-to-date"))
+                    else:
+                        tooltip.set_markup(_("Is not installed"))
                     return True
-                if count > 0:
+                elif count > 0:
                     markup += _("In use")
                     if count > 1:
                         markup += _("\n\nInstance count: %d") % count
                     tooltip.set_markup(markup)
                     return True
-                if count < 0:
+                elif count < 0:
                     markup += _("Problem loading - please check Looking Glass or your system's error log")
                     tooltip.set_markup(markup)
                     return True
-            elif column.get_property("title") == _("Score"):
-                tooltip.set_text(_("Popularity"))
-                return True
-            elif column.get_property("title") == _("Available"):
-                tooltip.set_text(_("More info"))
-                return True
         return False
 
     def model_sort_func(self, model, iter1, iter2, data=None):
-        s1 = ((not model[iter1][6]), model[iter1][5])
-        s2 = ((not model[iter2][6]), model[iter2][5])
+        #s1 = (("cs-xlet-system" in model[iter1][5]), model[iter1][3])
+        #s2 = (("cs-xlet-system" in model[iter2][5]), model[iter2][3])
+        s1 = ((not model[iter1][4]), model[iter1][3])
+        s2 = ((not model[iter2][4]), model[iter2][3])
         return (s1 > s2) - (s1 < s2)
 
-    def on_row_activated(self, treeview, path, column): # Only used in themes
+    def _on_row_activated(self, treeview, path, column): # Only used in themes
         iter = self.modelfilter.get_iter(path)
         uuid = self.modelfilter.get_value(iter, 0)
-        name = self.modelfilter.get_value(iter, 5)
-        self.enable_extension(uuid, name)
+        name = self.modelfilter.get_value(iter, 3)
+        if self.modelfilter.get_value(iter, 6):
+            self.enable_extension(uuid, name)
 
     def check_toggled(self, renderer, path, treeview):
         iter = self.modelfilter.get_iter(path)
         if (iter != None):
             uuid = self.modelfilter.get_value(iter, 0)
-            checked = self.modelfilter.get_value(iter, 15)
-            if abs(checked) > 1:
+            if self.modelfilter.get_value(iter, 7) != "white":
                 self.check_mark(uuid, False)
             else:
                 self.check_mark(uuid, True)
 
-    def check_mark(self, uuid, shouldMark=True, shouldUpdate=True): #fixme
+    def check_mark(self, uuid, shouldMark=True, forced=None): #fixme
         if self.model:
             for row in self.model:
                 if uuid == self.model.get_value(row.iter, 0):
-                    mark = self.model.get_value(row.iter, 15)
-                    if shouldMark:
-                        if mark == 0:
-                            mark = -2
-                            self.model.set_value(row.iter, 17, "green")
-                        elif mark == 1:
-                            can_update = self.model.get_value(row.iter, 16) < self.model.get_value(row.iter, 9)
-                            if can_update and shouldUpdate:
-                                mark = 3
-                                self.model.set_value(row.iter, 17, "yellow")
-                            else:
-                                mark = 2
-                                self.model.set_value(row.iter, 17, "red")
+                    if uuid in self.install_list:
+                        del self.install_list[uuid]
+                    if not shouldMark:
+                        self.model.set_value(row.iter, 7, "white")
+                    elif forced == "install":
+                        self.model.set_value(row.iter, 7, self.installed_color.get_rgba().to_string())
+                        self.install_list[uuid] = forced
+                    elif forced == "reinstall":
+                        self.model.set_value(row.iter, 7, self.reinstalled_color.get_rgba().to_string())
+                        self.install_list[uuid] = forced
+                    elif forced == "update":
+                        self.model.set_value(row.iter, 7, self.updated_color.get_rgba().to_string())
+                        self.install_list[uuid] = forced
+                    elif forced == "remove":
+                        self.model.set_value(row.iter, 7, self.removed_color.get_rgba().to_string())
+                        self.install_list[uuid] = forced
                     else:
-                        if mark == -2:
-                            mark = 0
-                        elif mark == 2 or mark == 3:
-                            mark = 1
-                        self.model.set_value(row.iter, 17, "white")
-                    self.model.set_value(row.iter, 15, mark)
-                    #date = self.model.get_value(row.iter, 9)
-
-            if not shouldMark:
-                newExtensions = []
-                for i_uuid, is_update, is_active in self.install_list:
-                    if uuid != i_uuid:
-                        newExtensions += [(i_uuid, is_update, is_active)]
-                self.install_list = newExtensions
-            else:
-                if uuid not in self.install_list:
-                    is_update = self.model.get_value(row.iter, 16) < self.model.get_value(row.iter, 9)
-                    is_active = self.model.get_value(row.iter, 2) > 0
-                    self.install_list += [(uuid, is_update, is_active)]
-
-            if len(self.install_list) > 0:
+                        is_installed = self.model.get_value(row.iter, 6)
+                        if is_installed:
+                            if is_installed == 2:
+                                self.install_list[uuid] = "update"
+                                self.model.set_value(row.iter, 7, self.updated_color.get_rgba().to_string())
+                            else:
+                                self.install_list[uuid] = "remove"
+                                self.model.set_value(row.iter, 7, self.removed_color.get_rgba().to_string())
+                        else:
+                            self.model.set_value(row.iter, 7, self.installed_color.get_rgba().to_string())
+                            self.install_list[uuid] = "install"
+            if len(self.install_list.keys()) > 0:
                 self.install_button.set_sensitive(True)
             else:
                 self.install_button.set_sensitive(False)
 
-    def celldatafunction_checkbox(self, column, cell, model, iter, data=None): #fixme
-        if self.enable_render:
-            checked = model.get_value(iter, 15)
-            cell.set_property("activatable", True)#not installed or can_update
-            if abs(checked) > 1:
-                cell.set_property("active", True)
-                if checked == 3:
-                    cell.set_property("cell-background","yellow")
-                elif checked == 2:
-                    cell.set_property("cell-background","red")
-                elif checked == -2:
-                    cell.set_property("cell-background","green")
-            else:
-                cell.set_property("active", False)
-                cell.set_property("cell-background","white")
-
     def view_details(self, uuid):
-        model, treeiter = self.treeview.get_selection().get_selected()
-        if treeiter:
-            uuid = model.get_value(treeiter, 0)
-            pkg_info = self.spices.get_package_info(uuid, self.collection_type)
-            if ("spices-show" in pkg_info) and (pkg_info["spices-show"]):
-                os.system("xdg-open %s" % pkg_info["spices-show"])
+        pkg_info = self.spices.get_package_info(uuid, self.collection_type)
+        if ("spices-show" in pkg_info) and (pkg_info["spices-show"]):
+            os.system("xdg-open %s" % pkg_info["spices-show"])
 
-    def on_button_release_event(self, widget, event):
+    def _on_button_release_event(self, widget, event):
         self._selection_changed()
 
-    def on_button_press_event(self, widget, event):
+    def _on_button_press_event(self, widget, event):#fixme
         if event.button == 1:
             data = widget.get_path_at_pos(int(event.x),int(event.y))
             if data:
                 path, column, x, y = data
-                if column.get_property("title") == _("Available"):
+                if column == self.column6:
                     iter = self.modelfilter.get_iter(path)
                     uuid = self.modelfilter.get_value(iter, 0)
                     self.view_details(uuid)
@@ -874,7 +837,6 @@ class ExtensionSidePage (SidePage):
 
         elif event.button == 3:
             data = widget.get_path_at_pos(int(event.x),int(event.y))
-            res = False
             if data:
                 sel=[]
                 path, col, cx, cy=data
@@ -884,113 +846,116 @@ class ExtensionSidePage (SidePage):
                 for i in self.treeview.get_selection().get_selected_rows()[1]:
                     sel.append(i.get_indices()[0])
 
-                if sel:
+                if len(sel) > 0:
                     popup = Gtk.Menu()
                     popup.attach_to_widget(self.treeview, None)
 
                     uuid = self.modelfilter.get_value(iter, 0)
-                    name = self.modelfilter.get_value(iter, 5)
+                    name = self.modelfilter.get_value(iter, 3)
                     checked = self.modelfilter.get_value(iter, 2)
-                    mark_install = self.modelfilter.get_value(iter, 15)
-                    can_update = self.modelfilter.get_value(iter, 16) < self.modelfilter.get_value(iter, 9)
-                    can_modify = self.modelfilter.get_value(iter, 6)
-                    marked = abs(mark_install) > 1
-                    installed = mark_install > 0
+                    is_installed = self.modelfilter.get_value(iter, 6)
+                    cache = self.modelfilter.get_value(iter, 12)
+                    can_modify = self.modelfilter.get_value(iter, 4)#not "cs-xlet-system" in self.modelfilter.get_value(iter, 5)
 
+                    configure_item = None
                     if self.should_show_config_button(self.modelfilter, iter):
-                        item = Gtk.MenuItem(_("Configure"))
-                        item.connect("activate", lambda x: self._item_configure_extension())
-                        item.set_sensitive(checked > 0)
-                        popup.add(item)
-                        popup.add(Gtk.SeparatorMenuItem())
+                        configure_item = Gtk.MenuItem(_("Configure"))
+                        configure_item.connect("activate", lambda x: self._item_configure_extension())
+                        configure_item.set_sensitive(checked > 0)
+                    elif self.should_show_ext_config_button(self.modelfilter, iter):
+                        configure_item = Gtk.MenuItem(_("Configure"))
+                        configure_item.connect("activate", lambda x: self._external_configure_launch())
+                        configure_item.set_sensitive(checked > 0)
 
-                    if self.should_show_ext_config_button(self.modelfilter, iter):
-                        item = Gtk.MenuItem(_("Configure"))
-                        item.connect("activate", lambda x: self._external_configure_launch())
-                        item.set_sensitive(checked > 0)
-                        popup.add(item)
-                        popup.add(Gtk.SeparatorMenuItem())
-
+                    deactive_item = None
+                    active_item = None
                     if not self.themes:
                         if checked != 0:
                             if self.collection_type == "applet":
-                                item = Gtk.MenuItem(_("Remove from panel"))
+                                deactive_item = Gtk.MenuItem(_("Remove from panel"))
                             elif self.collection_type == "desklet":
-                                item = Gtk.MenuItem(_("Remove from desktop"))
+                                deactive_item = Gtk.MenuItem(_("Remove from desktop"))
                             elif self.collection_type == "extension":
-                                item = Gtk.MenuItem(_("Remove from Cinnamon"))
+                                deactive_item = Gtk.MenuItem(_("Remove from Cinnamon"))
                             else:
-                                item = Gtk.MenuItem(_("Remove")) 
-                            item.connect("activate", lambda x: self.disable_extension(uuid, name, checked))
-                            popup.add(item)
+                                deactive_item = Gtk.MenuItem(_("Remove")) 
+                            deactive_item.connect("activate", lambda x: self.disable_extension(uuid, name, checked))
 
-                        max_instances = self.modelfilter.get_value(iter, 3)
-                        can_instance = installed and checked != -1 and (max_instances == -1 or ((max_instances > 0) and (max_instances > checked)))
+                        max_instances = cache["max-instances"]
+                        can_instance = is_installed and checked != -1 and (max_instances == -1 or ((max_instances > 0) and (max_instances > checked)))
 
                         if can_instance:
                             if self.collection_type == "applet":
-                                item = Gtk.MenuItem(_("Add to panel"))
+                                active_item = Gtk.MenuItem(_("Add to panel"))
                             elif self.collection_type == "desklet":
-                                item = Gtk.MenuItem(_("Add to desktop"))
+                                active_item = Gtk.MenuItem(_("Add to desktop"))
                             elif self.collection_type == "extension":
-                                item = Gtk.MenuItem(_("Add to Cinnamon"))
+                                active_item = Gtk.MenuItem(_("Add to Cinnamon"))
                             elif self.collection_type == "theme":
-                                item = Gtk.MenuItem(_("Apply theme"))
+                                active_item = Gtk.MenuItem(_("Apply theme"))
                             else:
-                                item = Gtk.MenuItem(_("Add"))
-                            item.connect("activate", lambda x: self.enable_extension(uuid, name))
-                            popup.add(item)
-                    elif installed and checked <= 0:
-                        item = Gtk.MenuItem(_("Apply theme"))
-                        item.connect("activate", lambda x: self.enable_extension(uuid, name))
-                        popup.add(item)
+                                active_item = Gtk.MenuItem(_("Add"))
+                            active_item.connect("activate", lambda x: self.enable_extension(uuid, name))
+                    elif is_installed and checked <= 0:
+                        active_item = Gtk.MenuItem(_("Apply theme"))
+                        active_item.connect("activate", lambda x: self.enable_extension(uuid, name))
 
-                    if installed:
+                    if active_item or deactive_item:
+                        if configure_item:
+                            popup.add(Gtk.SeparatorMenuItem())
+                        if active_item:
+                            popup.add(active_item)
+                        if deactive_item:
+                            popup.add(deactive_item)
+                        popup.add(Gtk.SeparatorMenuItem())
+                    elif configure_item:
                         popup.add(Gtk.SeparatorMenuItem())
 
-                    item_install = Gtk.MenuItem(_("Install"))
-                    item_uninstall = Gtk.MenuItem(_("Uninstall"))
-                    if can_modify:
-                        if installed:
-                            schema_filename = self.modelfilter.get_value(iter, 12)
-                            item_uninstall.connect("activate", lambda x: self.uninstall_extension(uuid, name, schema_filename))
-                            item_uninstall.set_sensitive(True)
-                            item_install.set_sensitive(False)
-                        else:
-                            item_install.connect("activate", lambda x: self.install_extension(uuid, not can_update, checked > 0))
-                            item_install.set_sensitive(True)
-                            item_uninstall.set_sensitive(False)
-                    else:
-                        item_install.set_sensitive(False)
-                        item_uninstall.set_sensitive(False)
-                    popup.add(item_uninstall)
+                    item_unmark = Gtk.MenuItem(_("Unmark"))
+                    item_install = Gtk.MenuItem(_("Mark for installation"))
+                    item_reinstall = Gtk.MenuItem(_("Mark for reinstallation"))
+                    item_upgrade = Gtk.MenuItem(_("Mark for upgrade"))
+                    item_remove = Gtk.MenuItem(_("Mark for remove"))
+                    popup.add(item_unmark)
                     popup.add(item_install)
+                    popup.add(item_reinstall)
+                    popup.add(item_upgrade)
+                    popup.add(item_remove)
+                    item_install.set_sensitive(False)
+                    item_reinstall.set_sensitive(False)
+                    item_upgrade.set_sensitive(False)
+                    item_remove.set_sensitive(False)
 
-                    popup.add(Gtk.SeparatorMenuItem())
-                    if (marked):
-                        item = Gtk.MenuItem(_("Unmark"))
-                        popup.add(item)
-                        item.connect("activate", lambda x: self.check_mark(uuid, False))
-                    elif can_modify:
-                        if installed:
-                            if can_update:
-                                item_upgrade = Gtk.MenuItem(_("Mark for upgrade"))
-                                popup.add(item_upgrade)
-                                item_upgrade.connect("activate", lambda x: self.check_mark(uuid, True))
-                            item = Gtk.MenuItem(_("Mark for remove"))
-                        else:
-                            item = Gtk.MenuItem(_("Mark for installation"))
-                        popup.add(item)
-                        item.connect("activate", lambda x: self.check_mark(uuid, True, False))
-
-                    popup.add(Gtk.SeparatorMenuItem())
-                    item = Gtk.MenuItem(_("More info"))
-                    if can_modify:
-                        item.connect("activate", lambda x: self.view_details(uuid))
+                    if (uuid in self.install_list):
+                        item_unmark.set_sensitive(True)
+                        item_unmark.connect("activate", lambda x: self.check_mark(uuid, False))
+                        previuslly = self.install_list[uuid]
                     else:
-                        item.set_sensitive(False)
-                    popup.add(item)
+                        item_unmark.set_sensitive(False)
+                        previuslly = ""
+                    if can_modify:
+                        if is_installed:
+                            if is_installed == 2 and previuslly != "update":
+                                item_upgrade.set_sensitive(True)
+                                item_upgrade.connect("activate", lambda x: self.check_mark(uuid, True, "update"))
+                            if previuslly != "reinstall":
+                                item_reinstall.set_sensitive(True)
+                                item_reinstall.connect("activate", lambda x: self.check_mark(uuid, True, "reinstall"))
+                            if previuslly != "remove":
+                                item_remove.set_sensitive(True)
+                                item_remove.connect("activate", lambda x: self.check_mark(uuid, True, "remove"))
+                        elif previuslly != "install":
+                            item_install.set_sensitive(True)
+                            item_install.connect("activate", lambda x: self.check_mark(uuid, True, "install"))
 
+                    popup.add(Gtk.SeparatorMenuItem())
+                    item_more = Gtk.MenuItem(_("More info"))
+                    if cache["spices-show"]:
+                        item_more.set_sensitive(True)
+                        item_more.connect("activate", lambda x: self.view_details(uuid))
+                    else:
+                        item_more.set_sensitive(False)
+                    popup.add(item_more)
                     popup.show_all()
                     popup.popup(None, None, None, None, event.button, event.time)
 
@@ -999,145 +964,56 @@ class ExtensionSidePage (SidePage):
                     return False
             return True
         return False
-   
-    def _is_active_data_func(self, column, cell, model, iter, data=None):
-        if self.enable_render:
-            update_change = False
-            uuid = model.get_value(iter, 0)
-            enabled = model.get_value(iter, 2) > 0
-            error = model.get_value(iter, 2) < 0
-            checked = model.get_value(iter, 15)
-            installed = checked > 0
-            can_update = model.get_value(iter, 16) < model.get_value(iter, 9)
-            if installed and can_update:
-                if not uuid in self.update_list: 
-                    self.update_list[uuid] = True
-                    update_change = True
-                elif (not can_update) and (uuid in self.update_list.keys()):
-                    del self.update_list[uuid]
-            if checked == 3:
-                cell.set_property("cell-background","yellow")
-            elif checked == 2:
-                cell.set_property("cell-background","red")
-            elif checked == -2:
-                cell.set_property("cell-background","green")
-            else:
-                cell.set_property("cell-background","white")
-            #cell.set_property("icon-name", model.get_value(iter, 11))
-            if update_change:
-                self.refresh_update_button()
 
-    def version_compare(self, uuid, date):
-        installed = False
-        can_update = False
-        is_active = False
-
-        installed_iter = self.model.get_iter_first()
-        while installed_iter != None:
-            installed_uuid = self.model.get_value(installed_iter, 0)
-            if uuid == installed_uuid:
-                installed_mark = self.model.get_value(installed_iter, 15)
-                if installed_mark > 0:
-                    installed = True
-                    installed_date = self.model.get_value(installed_iter, 9)
-                    can_update = date > installed_date
-                    is_active = self.model.get_value(installed_iter, 2) > 0
-                    break
-            installed_iter = self.model.iter_next(installed_iter)
-        return installed, can_update, is_active
-
-    def _on_motion_notify_event(self, widget, event):
-        data = widget.get_path_at_pos(int(event.x),int(event.y))
-        if data:
-            path, column, x, y=data
-            iter = self.modelfilter.get_iter(path)
-            if column.get_property("title")== _("Available") and iter != None:
-                self.treeview.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.HAND2))
-                return
-        self.treeview.get_window().set_cursor(Gdk.Cursor.new(Gdk.CursorType.ARROW))
-
-    def only_active(self, model, iterr, data=None):
+    def _only_active(self, model, iter, data=None):#fixme
         query = self.search_entry.get_buffer().get_text().lower()
         empty = (query == "")
-        extensionName = model.get_value(iterr, 5)
+        extensionName = model.get_value(iter, 3)
         if extensionName == None:
             return False
-
         if not (query.lower() in extensionName.lower()):
             return False
-
         if self.showFilter == SHOW_ALL:
             return True
         if self.showFilter == SHOW_ACTIVE:
-            return (model.get_value(iterr, 2) > 0)
+            return (model.get_value(iter, 2) > 0)
         if self.showFilter == SHOW_INACTIVE:
-            return (model.get_value(iterr, 2) <= 0)
+            return (model.get_value(iter, 2) <= 0)
         if self.showFilter == SHOW_BROKEN:
-            return (model.get_value(iterr, 2) < 0)
-        #can_update = model.get_value(iterr, 16) < model.get_value(iterr, 9)        #SHOW_SETTINGS = 6
+            return (model.get_value(iter, 2) < 0)
         if self.showFilter == SHOW_INSTALLED:
-            return (model.get_value(iterr, 15) > 0)
+            return (model.get_value(iter, 6) > 0)
         if self.showFilter == SHOW_ONLINE:
-            return (model.get_value(iterr, 15) <= 0)
+            return (model.get_value(iter, 6) <= 0)
         return False
 
     def on_entry_refilter(self, widget, data=None):
         self.modelfilter.refilter()
 
-    def install_extension(self, uuid, is_update, is_active):
-        install_list.append(uuid)
-        self.list_to_update += [("install", uuid, (is_update or is_active))]
-        self.install_extensions([(uuid)])
-
-    def _install_extensions(self, install_list):
-        dialog = Gtk.MessageDialog(transient_for = None,
-                                   modal = True,
-                                   message_type = Gtk.MessageType.WARNING)
-        esc = cgi.escape("This action is not implemented yet")
-        dialog.set_markup(esc)
-
-        dialog.add_button(_("Close"), 2)
-        dialog.set_default_response(2)
-
-        dialog.show_all()
-        response = dialog.run()
-        dialog.hide()
-        try :
-            dialog.destory()
-        except:
-            pass
-
-    def uninstall_extension(self, uuid, name, schema_filename):
-        self.list_to_update += [("uninstall", uuid, False)]
-        self.uninstall_extensions([(uuid)])
-        #self.spices.uninstall(self.collection_type, uuid, name, schema_filename, self.on_uninstall_finished)
-
-    def install_extensions(self, install_list):
-        if len(install_list) > 0:
-            self.spices.execute_install(self.collection_type, install_list, self.install_finished)
-
-    def uninstall_extensions(self, uninstall_list):
-        list_remove = ""
-        for item in uninstall_list:
-            if list_remove == "":
-                list_remove = item[0]
-            else:
-                list_remove += ", " + item[1]
-        if not self.show_prompt(_("Are you sure you want to completely remove %s?") % (list_remove)):
-            return
-        self.spices.execute_uninstall(self.collection_type, uninstall_list, self.on_uninstall_finished)
+    def _install_extensions(self):
+        if len(self.install_list.keys()) > 0:
+            msg = _("This operation will apply your selected changes.\n\nDo you want to continue?")
+            if not self.show_prompt(msg):
+                return
+            installer_list = { }
+            for uuid in self.install_list:
+                if not self.install_list[uuid] in installer_list:
+                    installer_list[self.install_list[uuid]] = []
+                installer_list[self.install_list[uuid]].append(uuid)
+            self.spices.execute_commit(self.collection_type, installer_list, self._on_installer_finished)
     
-    def install_finished(self, need_restart):
-        for row in self.model:
-            self.model.set_value(row.iter, 2, 0)
-        self.install_button.set_sensitive(False)
-        self.install_list = []
-        self.load_extensions()
+    def _on_installer_finished(self, service, need_restart):
+        GObject.idle_add(self._on_install_finished, need_restart)
+
+    def _on_install_finished(self, need_restart):
+        for uuid in self.install_list:
+            if self.install_list[uuid] == "remove":
+                self.disable_extension(uuid, "", 0)
+            #if self.install_list[uuid] == "install":
+            #    self.disable_extension(uuid, "", 0)
+        self.load_extensions(False, True)
         if need_restart:
             self.show_info(_("Please restart Cinnamon for the changes to take effect"))
-
-    def on_uninstall_finished(self, uuid=None):
-        self.load_extensions()
 
     def enable_extension(self, uuid, name):
         if not self.themes:
@@ -1153,7 +1029,7 @@ class ExtensionSidePage (SidePage):
 
             self.settings.set_strv(("enabled-%ss") % (self.collection_type), self.enabled_extensions)
         else:
-            if uuid == "STOCK":
+            if uuid == "cinnamon":
                 self.settings.set_string("name", "")
             else:
                 self.settings.set_string("name", name)
@@ -1197,63 +1073,53 @@ Please contact the developer.""")
     def disable_extension(self, uuid, name, checked=0):
         if (checked > 1):
             msg = _("There are multiple instances, do you want to remove all of them?\n\n")
-            msg += self.RemoveString
-
             if not self.show_prompt(msg):
                 return
         if not self.themes:
-            newExtensions = []
-            for enabled_extension in self.enabled_extensions:
-                if uuid not in enabled_extension:
-                    newExtensions.append(enabled_extension)
-            self.enabled_extensions = newExtensions
-            self.settings.set_strv(("enabled-%ss") % (self.collection_type), self.enabled_extensions)
+            new_enabled_ext = []
+            enabled_extensions = self.settings.get_strv(("enabled-%ss") % (self.collection_type))
+            for ext in enabled_extensions:
+                if not uuid in ext:
+                    new_enabled_ext.append(ext)
+            self.settings.set_strv(("enabled-%ss") % (self.collection_type), new_enabled_ext)
         else:
-            if self.enabled_extensions[0] == name:
+            if self.enabled_extensions[0] == name: # test this
                 self._restore_default_extensions()
 
     def _enabled_extensions_changed(self):
-        last_selection = ""
-        model, treeiter = self.treeview.get_selection().get_selected()
         self.refresh_running_uuids()
-
+        old_extensions = self.enabled_extensions
         if self.themes:
             self.enabled_extensions = [self.settings.get_string("name")]
         else:
             self.enabled_extensions = self.settings.get_strv(("enabled-%ss") % (self.collection_type))
+        self.parse_enabled_extensions(self.enabled_extensions, old_extensions)
+        GObject.idle_add(self._update_status)
 
-        uuidCount = {}
-        for enabled_extension in self.enabled_extensions:
+    def parse_enabled_extensions(self, new_ext, old_ext):
+        parse_uuid = []
+        for ext in new_ext + old_ext:
             try:
-                uuid = self.fromSettingString(enabled_extension)
-                if uuid == "":
-                    uuid = "STOCK"
-                if uuid in uuidCount:
-                    uuidCount[uuid] += 1
+                if self.themes:
+                    uuid = str.lower(self.fromSettingString(ext))
+                    if uuid == "" or uuid == "STOCK": uuid = "cinnamon"
                 else:
-                    uuidCount[uuid] = 1
+                    uuid = self.fromSettingString(ext)
+                if not uuid in parse_uuid:
+                    parse_uuid.append(uuid)
             except:
                 pass
         if self.model:
             for row in self.model:
-                if not self.themes:
-                    uuid = self.model.get_value(row.iter, 0)
-                else:
-                    if self.model.get_value(row.iter, 0) == "STOCK":
-                        uuid = "STOCK"
-                    else:
-                        uuid = self.model.get_value(row.iter, 5)
-                if uuid in uuidCount:
-                    if self.running_uuids is not None:
-                        if uuid in self.running_uuids:
-                            self.model.set_value(row.iter, 2, uuidCount[uuid])
-                        else:
-                            self.model.set_value(row.iter, 2, -1)
-                    else:
-                        self.model.set_value(row.iter, 2, uuidCount[uuid])
-                else:
-                    self.model.set_value(row.iter, 2, 0)
-        self._selection_changed()
+                uuid = self.model.get_value(row.iter, 0)
+                if uuid in parse_uuid:
+                    found = self.model.get_value(row.iter, 2)
+                    found = self._get_number_of_instances(uuid, found)
+                    os_access = self.model.get_value(row.iter, 4)
+                    is_installed = self.model.get_value(row.iter, 6)
+                    icon_status = self._get_icon_status(os_access, found, is_installed == 2)
+                    self.model.set_value(row.iter, 2, found)
+                    self.model.set_value(row.iter, 5, icon_status)
 
     def _add_another_instance(self):
         model, treeiter = self.treeview.get_selection().get_selected()
@@ -1261,19 +1127,10 @@ Please contact the developer.""")
             self._add_another_instance_iter(treeiter)
 
     def select_updated_extensions(self):
-        if len(self.update_list) > 1:
-            msg = _("This operation will update the selected items.\n\nDo you want to continue?")
-        else:
-            msg = _("This operation will update the selected item.\n\nDo you want to continue?")
-        if not self.show_prompt(msg):
-            return
-        for row in self.model:
-            uuid = self.model.get_value(row.iter, 0)
-            if uuid in self.update_list.keys():
-                self.check_mark(uuid, True)
-        self.install_extensions(self.install_list)
+        for uuid in self.update_list:
+            self.check_mark(uuid, True, "update")
 
-    def refresh_update_button(self):
+    def _refresh_update_button(self):
         num = len(self.update_list)
         text = _("%d updates available!") % (num)
         if text == self.select_updated.get_label():
@@ -1290,17 +1147,17 @@ Please contact the developer.""")
 
     def _add_another_instance_iter(self, treeiter):
         uuid = self.modelfilter.get_value(treeiter, 0)
-        name = self.modelfilter.get_value(treeiter, 5)
-        self.enable_extension(uuid, name)
+        name = self.modelfilter.get_value(treeiter, 3)
+        if not self.themes or self.modelfilter.get_value(treeiter, 6):
+            self.enable_extension(uuid, name)
         
-    def _selection_changed(self):
+    def _selection_changed(self):#fixme
         model, treeiter = self.treeview.get_selection().get_selected()
         enabled = False
-
         if treeiter:
             checked = model.get_value(treeiter, 2)
-            max_instances = model.get_value(treeiter, 3)
-            mark_install = model.get_value(treeiter, 15)
+            max_instances = model.get_value(treeiter, 12)["max-instances"]
+            mark_install = model.get_value(treeiter, 6)
             enabled = mark_install > 0 and (checked != -1) and (max_instances > checked)
 
             self.instanceButton.set_sensitive(enabled)
@@ -1309,16 +1166,18 @@ Please contact the developer.""")
             self.configureButton.set_sensitive(checked > 0)
             self.extConfigureButton.set_visible(self.should_show_ext_config_button(model, treeiter))
             self.extConfigureButton.set_sensitive(checked > 0)
-            self.get_information_for_selected()
+            GObject.idle_add(self.get_information_for_selected)
 
     def should_show_config_button(self, model, iter):
-        hide_override = model.get_value(iter, 7)
-        setting_type = model.get_value(iter, 13)
+        cache = model.get_value(iter, 12)
+        hide_override = cache["hide-configuration"]
+        setting_type = cache["settings-type"]
         return setting_type == SETTING_TYPE_INTERNAL and not hide_override
 
     def should_show_ext_config_button(self, model, iter):
-        hide_override = model.get_value(iter, 7)
-        setting_type = model.get_value(iter, 13)
+        cache = model.get_value(iter, 12)
+        hide_override = cache["hide-configuration"]
+        setting_type = cache["settings-type"]
         return setting_type == SETTING_TYPE_EXTERNAL and not hide_override
 
     def _item_configure_extension(self, widget = None):
@@ -1340,7 +1199,7 @@ Please contact the developer.""")
     def _external_configure_launch(self, widget = None):
         model, treeiter = self.treeview.get_selection().get_selected()
         if treeiter:
-            app = model.get_value(treeiter, 8)
+            app = model.get_value(treeiter, 12)["ext-setting-app"]
             if app is not None:
                 subprocess.Popen([app])
 
@@ -1358,43 +1217,41 @@ Please contact the developer.""")
 
     def uuid_already_in_list(self, uuid, model):
         installed_iter = model.get_iter_first()
-        #if self.themes:
-        #    col = 5
-        #else:
-        #    col = 0
-        col = 0
         while installed_iter != None:
-            installed_uuid = model.get_value(installed_iter, col)
+            installed_uuid = model.get_value(installed_iter, 0)
             if uuid == installed_uuid:
                 return installed_iter
             installed_iter = model.iter_next(installed_iter)
         return None
 
-    def get_number_of_instances(self, uuid):
+    def _get_number_of_instances(self, uuid, found=0):
+        #if found == -1: return found
         found = 0
         if self.themes:
+            found = 0
             for enabled_uuid in self.enabled_extensions:
-                if enabled_uuid == uuid:
+                valid_uuid = str.lower(enabled_uuid)
+                if (valid_uuid == uuid) or (valid_uuid == "" and (uuid == "cinnamon")):
                     found = 1
-                elif enabled_uuid == "" and (uuid == "STOCK" or uuid == "cinnamon"):
-                    found = 1
+                    break
         else:
             for enabled_uuid in self.enabled_extensions:
                 if uuid in enabled_uuid:
                     found += 1
+            if (found) and (self.running_uuids) and (not uuid in self.running_uuids):
+                found = -1
         return found
 
-    def load_extensions(self, forced=False):
+    def load_extensions(self, refresh=False, forced=False):
         #self.install_button.set_sensitive(False)
         self.extensions_is_loading = True
-        self.update_list = {}
-        if self.model:
-            self.model.clear()
-        self.model_new = Gtk.TreeStore(str, str, int, int, str, str, int, bool, str, int, str, str, str, int, int, int, int, str, object, str)
-        if forced:
+        self.model_new = Gtk.TreeStore(str, str, int, str, bool, str, int, str, int, str, str, object, object)
+        if refresh:
             self.spices.refresh_cache(True, self.collection_type, self.on_installer_load)
         else:
-            self.spices.load_cache(forced, True, self.collection_type, self.on_installer_load)
+            self.spices.load_cache(forced, self.collection_type, self.on_installer_load)
+            #self.spices.load_cache(forced, self.collection_type)
+        #self.on_installer_load(None, "")
 
     def on_load_extensions_finished(self):
         if(self.treeview):
@@ -1404,39 +1261,43 @@ Please contact the developer.""")
         if not self.extensions_is_loaded:
             self.extensions_is_loaded = True
             self.check_third_arg()
+        GObject.idle_add(self._update_status)
+
+    def _update_status(self):
         self._selection_changed()
+        self._refresh_update_button()
 
     def update_model(self):
         self.model = self.model_new
+        self.modelfilter = self.model.filter_new()
+        self.modelfilter.set_visible_func(self._only_active)
+        self.treeview.set_model(self.modelfilter)
         self.model.set_default_sort_func(self.model_sort_func)
         self.model.set_sort_column_id(-1, Gtk.SortType.ASCENDING)
-        self.modelfilter = self.model.filter_new()
-        self.modelfilter.set_visible_func(self.only_active)
-        self.treeview.set_model(self.modelfilter)
     '''
-    def update_model_alternative(self):
-        cut_model = Gtk.TreeStore(str, str, int, int, str, str, int, bool, str, int, str, str, str, int, int, int, int, str, object, str)
-        self.model = self.cut_model_render(self.model_new, cut_model, 0, 15)
+    def update_model_alternative(self):#fixme
+        cut_model = Gtk.TreeStore(str, str, int, str, bool, str, int, str, int, str, str, object, object)
+        self.model = self.cut_model_render(self.model_new, cut_model, 0, 6)
         self.modelfilter = self.model.filter_new()
         self.treeview.set_model(self.modelfilter)
         GObject.idle_add(self.connected_render)
         #self.connected_render()
 
-    def connected_render(self):
+    def connected_render(self):#fixme
         self.enable_render = False
-        self.cut_model_render(self.model_new, self.model, 15, 100000)
+        self.cut_model_render(self.model_new, self.model, 6, 100000)
         #GObject.idle_add(self.connected_ended)
         GObject.timeout_add(10, self.connected_ended)
 
     def connected_ended(self):
         #self.model.set_default_sort_func(self.model_sort_func)
         #self.model.set_sort_column_id(-1, Gtk.SortType.ASCENDING)
-        self.modelfilter.set_visible_func(self.only_active)
+        self.modelfilter.set_visible_func(self._only_active)
         self.enable_render = True
         #rect = self.treeview.get_visible_rect()
         #self.modelfilter.refilter()
 
-    def cut_model_render(self, model, cut_model, start, end):
+    def cut_model_render(self, model, cut_model, start, end):#fixme
         iter = model.get_iter_first()
         val = 0
         while (iter != None) and (val < start):
@@ -1453,30 +1314,17 @@ Please contact the developer.""")
             cut_model.set_value(iter_new, 6, model.get_value(iter, 6))
             cut_model.set_value(iter_new, 7, model.get_value(iter, 7))
             cut_model.set_value(iter_new, 8, model.get_value(iter, 8))
-            cut_model.set_value(iter_new, 9, model.get_value(iter, 9))
+            cut_model.set_value(iter_new, 9, model.get_value(iter, 9)) 
             cut_model.set_value(iter_new, 10, model.get_value(iter, 10))
-            cut_model.set_value(iter_new, 11, model.get_value(iter, 11))
+            cut_model.set_value(iter_new, 11, model.get_value(iter, 11)) #Wrapper: We don't want load several time the icons and we want fill the model asyncronous...
             cut_model.set_value(iter_new, 12, model.get_value(iter, 12))
-            cut_model.set_value(iter_new, 13, model.get_value(iter, 13))
-            cut_model.set_value(iter_new, 14, model.get_value(iter, 14))
-            cut_model.set_value(iter_new, 15, model.get_value(iter, 15))
-            cut_model.set_value(iter_new, 16, model.get_value(iter, 16))
-            cut_model.set_value(iter_new, 17, model.get_value(iter, 17))
-            cut_model.set_value(iter_new, 18, model.get_value(iter, 18)) #Wrapper: We don't want load several time the icons and we want fill the model asyncronous...
             iter = model.iter_next(iter)
         return cut_model
     '''
     def on_installer_load(self, installer, msg):
         try:
-            spicesData = self.spices.get_all_local_packages(self.collection_type)
-            self.load_spice_model(spicesData, self.model_new, self.themes, self.collection_type, 
-                              self.spices.get_cache_folder(self.collection_type))
-            #print("total spices loaded: %d" % len(spicesData))
-        except Exception:
-            e = sys.exc_info()[1]
-            print("Failed to load extensions %s" % str(e))
-        try:
-            self.spicesData = self.spices.get_all_remote_packages(self.collection_type)
+            self.update_list = []
+            self.spicesData = self.spices.get_all_packages(self.collection_type)
             self.load_spice_model(self.spicesData, self.model_new, self.themes, self.collection_type, 
                               self.spices.get_cache_folder(self.collection_type))
             #print("total spices loaded: %d" % len(self.spicesData))
@@ -1489,76 +1337,72 @@ Please contact the developer.""")
         for uuid in spicesData:
             extensionData = spicesData[uuid]
             #uuid = extensionData["uuid"]
-            iter_already = self.uuid_already_in_list(uuid, model)
-            if iter_already:
-                continue
+            #iter_already = self.uuid_already_in_list(uuid, model)
+            #if iter_already:
+            #    continue
             try:
                 name = extensionData["name"]
                 if not is_theme:
                     #descrip = "<b>%s</b>\n<b><span foreground='#333333' size='xx-small'>%s</span></b>\n \
                     #          <i><span foreground='#555555' size='x-small'>%s</span></i>" % (name, uuid, description)
-                    descrip = "<b>%s</b>\n<b><span foreground='#333333' size='xx-small'>%s</span></b>" % (name, uuid)
+                    descrip = "<b>%s</b>\n<b><span foreground='#333333' size='xx-small'>%s</span></b>" % (name.replace("&", "&amp;"), uuid)
                 else:
-                    descrip = "<b>%s</b>" % (name)
+                    descrip = "<b>%s</b>" % (name.replace("&", "&amp;"))
 
                 #try: description = extensionData["comments"]
                 #except KeyError: description = ""
                 #except ValueError: description = ""
-
-                max_instances = extensionData["max-instances"]
-                last_edited = extensionData["last-edited"]
-                install_edited = extensionData["install-edited"]
-                setting_type = extensionData["settings-type"]
-                score = extensionData["score"]
-                icon = extensionData["icon"]
-                hide_config_button = extensionData["hide-configuration"]
-                ext_config_app = extensionData["ext-setting-app"]
-                schema_filename = extensionData["schema-file"]
                 found = 0
                 os_access = 1
+                icon_status = ""
                 installed_folder = extensionData["installed-folder"]
-                
-                icon_running = ""
-                installed = (installed_folder is not "")
-                if installed:
+                installed_type = extensionData["installed-type"]
+                if installed_type:
                     os_access = os.access(installed_folder, os.W_OK)
-                    found = self.get_number_of_instances(uuid)
-                    if (not (os_access)):
-                        if (found):
-                            icon_running = "cs-xlet-system-running"
-                        else:
-                            icon_running = "cs-xlet-system"
+                    found = self._get_number_of_instances(uuid)
+                    if (os_access and (installed_type == 2)):
+                        self.update_list.append(uuid)
                     else:
-                        if install_edited < last_edited:
-                            icon_running = "cs-xlet-update"
-                        elif (found):
-                            icon_running = "cs-xlet-running"
-                        else:
-                            icon_running = "cs-xlet-installed"
-                icon_root = ""
+                        installed_type = 1
+                    icon_status = self._get_icon_status(os_access, found, (installed_type == 2))
+                score = extensionData["score"]
+                install_ver = extensionData["install-ver"]
+                last_ver = "<span color='#0000FF'>%s</span>" % (extensionData["last-ver"])
+
                 iter = model.insert_before(None, None)
                 model.set_value(iter, 0, uuid)
                 model.set_value(iter, 1, descrip)
                 model.set_value(iter, 2, found)
-                model.set_value(iter, 3, max_instances)
-                model.set_value(iter, 4, icon)
-                model.set_value(iter, 5, name)
-                model.set_value(iter, 6, os_access)
-                model.set_value(iter, 7, hide_config_button)
-                model.set_value(iter, 8, ext_config_app)
-                model.set_value(iter, 9, last_edited)
-                model.set_value(iter, 10, icon_root)
-                model.set_value(iter, 11, icon_running)
-                model.set_value(iter, 12, schema_filename)
-                model.set_value(iter, 13, setting_type)
-                model.set_value(iter, 14, score)
-                model.set_value(iter, 15, installed)
-                model.set_value(iter, 16, install_edited)
-                model.set_value(iter, 17, "white")
-                model.set_value(iter, 18, None) #Wrapper: We don't want load several time the icons and we want fill the model asyncronous...
+                model.set_value(iter, 3, name)
+                model.set_value(iter, 4, os_access)
+                model.set_value(iter, 5, icon_status)
+                model.set_value(iter, 6, installed_type)
+                model.set_value(iter, 7, "white")
+                model.set_value(iter, 8, score)
+                model.set_value(iter, 9, install_ver)
+                model.set_value(iter, 10, last_ver)
+                model.set_value(iter, 11, None) #Wrapper: We don't want load several time the icons and we want fill the model asyncronous...
+                model.set_value(iter, 12, extensionData) # usage info, "max-instances", "spices-show", "hide-configuration", "settings-type", "ext-setting-app", "icon"
             except Exception:
                 e = sys.exc_info()[1]
                 print("Failed to load extension %s: %s" % (uuid, str(e)))
+
+    def _get_icon_status(self, os_access, found, update):
+        if found == -1:
+            return "cs-xlet-error"
+        if os_access:
+            if update:            
+                return "cs-xlet-update"
+            elif (found):
+                return "cs-xlet-running"
+            else:
+                return "cs-xlet-installed"
+        else:
+            if (found):
+                return "cs-xlet-system-running"
+            else:
+                return "cs-xlet-system"
+        return ""
 
     def show_prompt(self, msg):
         dialog = Gtk.MessageDialog(transient_for = None,
@@ -1622,12 +1466,13 @@ Please contact the developer.""")
             website = ""
             img_pixbuf = None
 
-            wrapper = model.get_value(treeiter, 18)
+            wrapper = model.get_value(treeiter, 11)
             if wrapper:
                 surface = wrapper.surface
                 img_pixbuf = Gdk.pixbuf_get_from_surface(surface, 0, 0, surface.get_width(), surface.get_height())
 
-            pkg_info = self.spices.get_package_info(uuid, self.collection_type)
+            #pkg_info = self.spices.get_package_info(uuid, self.collection_type)
+            pkg_info = model.get_value(treeiter, 12)
 
             try: extension_name = pkg_info["name"]
             except KeyError: extension_name = ""

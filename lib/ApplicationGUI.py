@@ -415,7 +415,7 @@ class ControlWindow(object):
 
     def exec_status(self, status, translation):
         if translation != "":
-            self.mainApp._statusLabel.set_markup(translation)
+            self.mainApp._statusLabel.set_markup(translation.replace("&", "&amp;"))
         elif status in CI_STATUS:
             self.mainApp._statusLabel.set_markup(CI_STATUS[status])
         else:
@@ -444,7 +444,7 @@ class ControlWindow(object):
     def exec_role(self, role_translate):
         end_iter = self.mainApp._terminalTextBuffer.get_end_iter()
         self.mainApp._terminalTextBuffer.insert(end_iter, role_translate+"\n")
-        self.mainApp._roleLabel.set_markup("<big><b>%s</b></big>" % role_translate)
+        self.mainApp._roleLabel.set_markup("<big><b>%s</b></big>" % role_translate.replace("&", "&amp;"))
 
     def exec_icon(self, icon_name):
         if icon_name is None:
@@ -493,6 +493,7 @@ class ControlWindow(object):
 
     def exec_percent_childs(self, id, img, name, percent, details):
         model = self.mainApp._downloadTreeView.get_model()
+        name = name.replace("&", "&amp;")
         if percent > 100:
             percent = 100
         try:
@@ -884,15 +885,15 @@ class MainApp():
         Gtk.main_quit()
 
     def show_info(self, title, message):
-        self._infoDialog.set_markup("<b>%s</b>" % title)
-        self._infoDialog.format_secondary_markup(message)
+        self._infoDialog.set_markup("<b>%s</b>" % title.replace("&", "&amp;"))
+        self._infoDialog.format_secondary_markup(message.replace("&", "&amp;"))
         response = self._infoDialog.run()
         if response:
             self._infoDialog.hide()
 
     def show_providers(self, info_prov):
-        self._chooseDialog.set_markup("<b>%s</b>" % info_prov["title"])
-        self._chooseDialog.format_secondary_markup(info_prov["description"])
+        self._chooseDialog.set_markup("<b>%s</b>" % info_prov["title"].replace("&", "&amp;"))
+        self._chooseDialog.format_secondary_markup(info_prov["description"].replace("&", "&amp;"))
         list_providers = info_prov["providers"]##need to be filled.
         self._chooseList.clear()
         for name in providers:
@@ -903,8 +904,8 @@ class MainApp():
             self._errorDialog.hide()
 
     def show_error(self, title, message, details=None):
-        self._errorDialog.set_markup("<b>%s</b>" % title)
-        self._errorDialog.format_secondary_markup(message)
+        self._errorDialog.set_markup("<b>%s</b>" % title.replace("&", "&amp;"))
+        self._errorDialog.format_secondary_markup(message.replace("&", "&amp;"))
         if details:
             self._errorExpander.set_visible(True)
             self._errorDetails.set_text(details)
@@ -913,8 +914,8 @@ class MainApp():
             self._errorDialog.hide()
 
     def show_question(self, title, message):
-        self._questionDialog.set_markup("<b>%s</b>" % title)
-        self._questionDialog.format_secondary_markup(message)
+        self._questionDialog.set_markup("<b>%s</b>" % title.replace("&", "&amp;"))
+        self._questionDialog.format_secondary_markup(message.replace("&", "&amp;"))
         response = self._questionDialog.run()
         self._questionDialog.hide()
         return (response == Gtk.ResponseType.YES)
@@ -946,8 +947,8 @@ class MainApp():
         else:
             self._confTreeView.set_size_request(350, 200)
             self._confTreeView.collapse_all()
-        self._confDialog.set_markup("<b>%s</b>" % infoConf["title"])
-        self._confDialog.format_secondary_markup(infoConf["description"])
+        self._confDialog.set_markup("<b>%s</b>" % infoConf["title"].replace("&", "&amp;"))
+        self._confDialog.format_secondary_markup(infoConf["description"].replace("&", "&amp;"))
         res = self._confDialog.run()
         self._confDialog.hide()
         return res == Gtk.ResponseType.OK

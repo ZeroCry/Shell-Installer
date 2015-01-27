@@ -285,7 +285,7 @@ class SidePage:
         self.size = size
         self.topWindow = None
         #self.builder = None
-        if self.module != None:
+        if self.module is not None:
             self.module.loaded = False
 
     def add_widget(self, widget):

@@ -159,7 +159,7 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
     def release_all(self):
         pass
 
-    def load_cache(self, forced=False, async=False, collect_type=None):
+    def load_cache(self, forced=False, collect_type=None):
         pass
 
     def have_cache(self, collect_type=None):
@@ -207,14 +207,28 @@ class InstallerService(GObject.GObject, aptdaemon.client.AptClient):#aptdaemon.c
         loop.quit()
 
     def get_all_remote_packages(self, loop, result, collect_type=None):
-        local_packages = []
-        result.append(local_packages)
+        remote_packages = []
+        result.append(remote_packages)
         try:
             listkeys = self.cache.keys()
             for pkgName in listkeys:
                 pkg = self.cache[pkgName]
                 if(not pkg.is_installed) and (not self._packageExistArch(pkgName)):
-                    local_packages.append(pkgName)
+                    remote_packages.append(pkgName)
+        except GLib.GError:
+            e = sys.exc_info()[1]
+            print(str(e))
+        loop.quit()
+
+    def get_all_packages(self, loop, result, collect_type=None):
+        all_packages = []
+        result.append(all_packages)
+        try:
+            listkeys = self.cache.keys()
+            for pkgName in listkeys:
+                pkg = self.cache[pkgName]
+                if (not self._packageExistArch(pkgName)):
+                    all_packages.append(pkgName)
         except GLib.GError:
             e = sys.exc_info()[1]
             print(str(e))

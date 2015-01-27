@@ -21,8 +21,8 @@
 
 from __future__ import print_function
 
-from gi.repository import Gtk, GObject, Pango
-import sys, os
+from gi.repository import Gtk, Gdk, GObject, Pango
+import sys, os, subprocess
 
 DIR_PATH = "/usr/lib/cinnamon-installer/"
 if not os.path.exists(DIR_PATH):
@@ -42,11 +42,17 @@ if not SETT_PATH in sys.path:
 try:
     from XletInstallerModules import *
     from SettingsInstallerWidgets import *
-    import InstallerProviders
+    import InstallerProviders, SystemTools
+    try:
+        import json
+    except ImportError:
+        import simplejson as json
 except Exception:
     e = sys.exc_info()[1]
     print(str(e))
     sys.exit(1)
+
+HOME_PATH = SystemTools.get_home()
 
 Gtk.IconTheme.get_default().append_search_path(os.path.join(DIR_PATH, "gui/img"))
 #Gtk.IconTheme.get_default().append_search_path("/usr/share/icons/hicolor/scalable/categories")
@@ -102,6 +108,7 @@ class Module:
             self.window.resize(800, 600)
             self.temporal_side_page.pack_start(self.content_installer_box, True, True, 0)
             self.displayCategories()
+            self.loadGeneralSettings()
         self.buildModule(self.currentModule)
 
     def checked_installer_arg(self):
@@ -267,3 +274,74 @@ class Module:
         iterator = self.store.get_iter(path)
         sidePage = self.store.get_value(iterator, 2)
         self.buildModule(sidePage.module)
+
+    def loadGeneralSettings(self):
+        self.integrate_checkbutton = self.builder.get_object("integrate_checkbutton")
+        if os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py"):
+            self.integrate_checkbutton.set_active(True)
+        else:
+            self.integrate_checkbutton.set_active(False)
+        self.integrate_checkbutton.connect("toggled", self.on_integrate_toggled)
+
+        self.installed_color = self.builder.get_object("installed_colorbutton")
+        self.reinstalled_color = self.builder.get_object("reinstalled_colorbutton")
+        self.removed_color = self.builder.get_object("removed_colorbutton")
+        self.updated_color = self.builder.get_object("updated_colorbutton")
+        self.installed_color.connect("color-set", self.safe_settings)
+        self.reinstalled_color.connect("color-set", self.safe_settings)
+        self.removed_color.connect("color-set", self.safe_settings)
+        self.updated_color.connect("color-set", self.safe_settings)
+        self.load_settings()
+
+    def load_settings(self):
+        settings_file = os.path.join(HOME_PATH, ".config/cinnamon-installer.json")
+        if os.path.exists(settings_file):
+            f = open(settings_file, "r")
+            try:
+                self.settings = json.load(f)
+            except ValueError:
+                pass
+                try:
+                    settings = { }
+                    os.remove(settings_file)
+                except:
+                    pass
+                self.safe_settings()
+        else:
+            self.safe_settings()
+            self.settings = { }
+        if len(self.settings.keys()) > 0:
+            color = Gdk.RGBA()
+            color.parse(self.settings["installed-color"])
+            self.installed_color.set_rgba(color)
+            color.parse(self.settings["reinstalled-color"])
+            self.reinstalled_color.set_rgba(color)
+            color.parse(self.settings["removed-color"])
+            self.removed_color.set_rgba(color)
+            color.parse(self.settings["updated-color"])
+            self.updated_color.set_rgba(color)
+
+    def safe_settings(self, widget=None):
+        settings_file = os.path.join(HOME_PATH, ".config/cinnamon-installer.json")
+        self.settings = {}
+        self.settings["installed-color"] = self.installed_color.get_rgba().to_string()
+        self.settings["reinstalled-color"] = self.reinstalled_color.get_rgba().to_string()
+        self.settings["removed-color"] = self.removed_color.get_rgba().to_string()
+        self.settings["updated-color"] = self.updated_color.get_rgba().to_string()
+        with open(settings_file, "w") as outfile:
+            json.dump(self.settings, outfile)
+
+    def on_integrate_toggled(self, menuitem):
+        have_module = os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py")
+        if (self.integrate_checkbutton.get_active()):
+            if not have_module:
+                setup = os.path.join(DIR_PATH, "tools/setup.py")
+                p = subprocess.call([setup, "-m"])
+                if not os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py"):
+                    self.integrate_checkbutton.set_active(False)   
+        else:
+            if have_module:
+                setup = os.path.join(DIR_PATH, "tools/setup.py")
+                p = subprocess.call([setup, "-d"])
+                if os.path.isfile("/usr/lib/cinnamon-settings/modules/cs_installer.py"):
+                    self.integrate_checkbutton.set_active(True)

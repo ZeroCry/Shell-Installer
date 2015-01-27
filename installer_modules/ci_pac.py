@@ -173,7 +173,7 @@ class InstallerService(GObject.GObject):
     def is_service_idle(self):
         return not self.lock_trans.locked()
 
-    def load_cache(self, forced=False, async=False, collect_type=None):
+    def load_cache(self, forced=False, collect_type=None):
         pass
 
     def have_cache(self, collect_type=None):
@@ -235,16 +235,32 @@ class InstallerService(GObject.GObject):
         loop.quit()
 
     def get_all_remote_packages(self, loop, result, collect_type=None):
-        local_packages = []
-        result.append(local_packages)
+        remote_packages = []
+        result.append(remote_packages)
         try:
             syncdbs = self.handle.get_syncdbs()
             localdb = self.handle.get_localdb()
             for repo in syncdbs:
                 for pkg in repo.pkgcache:
-                    if(not pkg.name in local_packages):
+                    if(not pkg.name in remote_packages):
                         if not localdb.get_pkg(pkg.name):
-                            local_packages.append(pkg.name)
+                            remote_packages.append(pkg.name)
+        except GLib.GError:
+            e = sys.exc_info()[1]
+            print(str(e))
+        sleep(0.1)
+        loop.quit()
+
+    def get_all_packages(self, loop, result, collect_type=None):
+        all_packages = []
+        result.append(all_packages)
+        try:
+            syncdbs = self.handle.get_syncdbs()
+            localdb = self.handle.get_localdb()
+            for repo in syncdbs:
+                for pkg in repo.pkgcache:
+                    if(not pkg.name in all_packages):
+                        all_packages.append(pkg.name)
         except GLib.GError:
             e = sys.exc_info()[1]
             print(str(e))

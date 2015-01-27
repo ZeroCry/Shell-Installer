@@ -74,7 +74,6 @@ class Transaction(object):
     def __init__(self, supported_collections):
         self.services = {}
         self.service = None
-        self.collect_type = None
         self.initialized_modules = {}
         self.loop = GObject.MainLoop()
         self.importer = Modules_Importer()
@@ -113,7 +112,6 @@ class Transaction(object):
             if not is_satisfy:
                 self.importerError = self.importer.get_importer_errors()
                 return False
-        self.collect_type = collect_type
         self.importerError = []
         return True
 
@@ -125,22 +123,29 @@ class Transaction(object):
         return self.importerError
 
     def set_service_for_collection(self, collect_type):
-        #if (self.collect_type != collect_type):
-        self.collect_type = collect_type
-        if self.service is not None:
-            self.disconnect_all_signals()
         if collect_type in self.services:
-            self.service = self.services[collect_type][0]
+            newService = self.services[collect_type][0]
+            if self.service is not None and self.service != newService:
+                self.disconnect_all_signals()
+            self.service = newService
             if (len(self.services[collect_type]) > 1):
                 print("More than one module for the same action was loaded")
         else:
             self.service = None 
 
     def connect(self, signal_name, client_handle):
+        handled_id = 0
         if self.service:
-            self.signals.append(self.service.connect(signal_name, client_handle))
+            handled_id = self.service.connect(signal_name, client_handle)
+            self.signals.append(handled_id)
         else:
             self._throwNotServiceError()
+        return handled_id
+
+    def disconnect(self, handled_id):
+        if handled_id in self.signals:
+            self.service.disconnect(handled_id)
+            self.signals.remove(handled_id)
 
     def disconnect_all_signals(self):
         for signal in self.signals:
@@ -201,6 +206,16 @@ class Transaction(object):
         if self.service:
             result = []
             thread = Thread(target = self.service.get_all_remote_packages, args=(self.loop, result, collect_type,))
+            thread.start()
+            self.loop.run()
+            return result[0]
+        self._throwNotServiceError()
+        return {}
+
+    def get_all_packages(self, collect_type=None):
+        if self.service:
+            result = []
+            thread = Thread(target = self.service.get_all_packages, args=(self.loop, result, collect_type,))
             thread.start()
             self.loop.run()
             return result[0]
@@ -335,9 +350,9 @@ class Transaction(object):
             self._throwNotServiceError()
 
     '''  this need to be see  '''
-    def load_cache(self, forced=False, async=False, collect_type=None):
+    def load_cache(self, forced=False, collect_type=None):
         if self.service:
-            thread = Thread(target = self.service.load_cache, args=(forced, async, collect_type,))
+            thread = Thread(target = self.service.load_cache, args=(forced, collect_type,))
             thread.start()
         else:
             self._throwNotServiceError()
@@ -368,6 +383,8 @@ class Transaction(object):
 class Installer():
     def __init__(self):
         self.supported_collections = []
+        self.signal_handles = {}
+        self.handled_id = 0
         self.trans = Transaction(self.supported_collections)
         self.mainApp = ApplicationGUI.MainApp()
         self.mainWind = ApplicationGUI.ControlWindow(self.mainApp)
@@ -423,27 +440,47 @@ class Installer():
     '''
     def execute_install(self, collect_type, pkgs_list, callback=None):
         if len(pkgs_list) > 0:
+            self.register_collection(collect_type)
             self.mainWind.show()
             self.trans.prepare_transaction_install(pkgs_list, collect_type)
+            if callback and callable(callback):
+                self.trans.connect("EmitTransactionDone", self._transaction_done_wrapper, callback)
             self.mainWind.run()
+
         else:
             print("Error, not packages founds")
 
     def execute_uninstall(self, collect_type, pkgs_list, callback=None):
         if len(pkgs_list) > 0:
+            self.register_collection(collect_type)
             self.mainWind.show()
             self.trans.prepare_transaction_remove(pkgs_list, collect_type)
+            self._set_transaction_conection(callback)
             self.mainWind.run()
         else:
             print("Error, not packages founds")
 
     def execute_commit(self, collect_type, pkgs_status, callback=None):
-        if len(pkgs_list) > 0:
+        if len(pkgs_status) > 0:
+            self.register_collection(collect_type)
             self.mainWind.show()
             self.trans.prepare_transaction_commit(pkgs_status, collect_type)
+            self._set_transaction_conection(callback)
             self.mainWind.run()
         else:
             print("Error, not packages founds")
+
+    def _set_transaction_conection(self, callback):
+        if callback and callable(callback):
+            self.handled_id = self.trans.connect("EmitTransactionDone", self._transaction_done_wrapper)
+            self.signal_handles[self.handled_id] = callback
+
+    def _transaction_done_wrapper(self, service, msg):
+        if self.handled_id > 0:
+            self.trans.disconnect(self.handled_id)
+            self.signal_handles[self.handled_id](service, msg)
+            del self.signal_handles[self.handled_id]
+        self.handled_id = 0
 
     '''
     def execute_uninstall_program(self, programName, callback=None):
@@ -475,23 +512,22 @@ class Installer():
             return result[0]
         return None
 
-    def load_cache(self, forced=False, async=False, collect_type=None, callback=None):
+    def load_cache(self, forced=False, collect_type=None, callback=None):
         self.register_collection(collect_type)
-        self.trans.load_cache(forced, async, collect_type)
-        if callback and callable(callback):
-            self.trans.connect("EmitTransactionDone", callback)
+        self.trans.load_cache(forced, collect_type)
+        self._set_transaction_conection(callback)
 
     def refresh_cache(self, show_window, collect_type, callback=None):
         self.register_collection(collect_type)
         if show_window:
             self.mainWind.show()
         self.trans.refresh_cache(True, collect_type)
-        if callback and callable(callback):
-            self.trans.connect("EmitTransactionDone", callback)
+        self._set_transaction_conection(callback)
         if show_window:
             self.mainWind.run()
 
     def have_cache(self, collect_type):
+        self.register_collection(collect_type)
         return self.trans.have_cache(collect_type)
 
     def get_all_local_packages(self, collect_type):
@@ -502,32 +538,13 @@ class Installer():
         self.register_collection(collect_type)
         return self.trans.get_all_remote_packages(collect_type)
 
+    def get_all_packages(self, collect_type):
+        self.register_collection(collect_type)
+        return self.trans.get_all_packages(collect_type)
+
     def get_package_info(self, pkg_id, collect_type):
         self.register_collection(collect_type)
         return self.trans.get_package_info(pkg_id, collect_type)
-        
-    #def load(self, mod_name, on_spice_load, force):
-        '''
-        if not mod_name == "theme":
-            self.scrubConfigDirs(mod_name, self.modules[mod_name].sidePage.enabled_extensions)
-        self.installer[mod_name].load(on_spice_load, force)
-        # this code it's for test
-        self.installer[mod_name].abort_download = ABORT_NONE
-        if (self.installer[mod_name].has_cache and not force):
-            self.installer[mod_name].load_cache()
-        elif force:
-            #self.emit("EmitTransactionStart", _("Refreshing index..."))
-            #self.installer[mod_name].refresh_cache()
-            #self.emit("EmitTransactionDone", "")
-            try:
-                self.run()
-                self.trans.set_service_for_collection("applet")
-                self.trans.load_cache(True)
-            except Exception:
-                e = sys.exc_info()[1]
-                print(str(e))
-        on_spice_load(self.installer[mod_name].index_cache)
-        '''
 
     def show_detail(self, collect_type, uuid, callback):
         print("Not implemented show_detail")

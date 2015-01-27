@@ -166,34 +166,27 @@ class InstallerService(GObject.GObject):
     def is_service_idle(self):
         return not self.lock_trans.locked()
 
-    def load_cache(self, forced=False, async=False, collect_type=None):
+    def load_cache(self, forced=False, collect_type=None):
         self.EmitTransactionStart("Start")
         self.EmitRole("Loading cache...")
-        self._internal_load_cache(True, forced, async, collect_type, self._on_cache_load_finished)
+        self._internal_load_cache(True, forced, collect_type, self._on_cache_load_finished)
         self.EmitTransactionDone("Finished")
 
-    def _internal_load_cache(self, emit=False, forced=False, async=False, collect_type=None, on_finish=None):
+    def _internal_load_cache(self, emit=False, forced=False, collect_type=None, on_finish=None):
         if forced or (not self.cache.is_load(collect_type)):
             if (not collect_type):
-                if (async):
-                    for collect_type in self.validTypes:
-                        if emit:
-                            self.EmitStatus("status-loading-cache", _("Loading cache for %ss...") % collect_type)
-                        thread = threading.Thread(target = self.cache.load_collection_type, args=(collect_type, on_finish))
-                        thread.start()
-                else:
-                    self.cache.load(on_finish)
+                for collect_type in self.validTypes:
+                    if emit:
+                        self.EmitStatus("status-loading-cache", _("Loading cache for %ss...") % collect_type)
+                    self.cache.load_collection_type(collect_type)
+                    if on_finish and callable(on_finish):
+                        on_finish()
             elif collect_type:
                 if emit:
                     self.EmitStatus("status-loading-cache", _("Loading cache for %ss...") % collect_type)
-                if (async):
-                    thread = threading.Thread(target = self.cache.load_collection_type, args=(collect_type, on_finish))
-                    thread.start()
-                else:
-                    self.cache.load_collection_type(collect_type, on_finish)
+                self.cache.load_collection_type(collect_type, on_finish)
 
     def _on_cache_load_finished(self):
-        self.EmitTransactionDone("Finished")
         print("finished cache_load_finished")
 
     def have_cache(self, collect_type=None):
@@ -213,7 +206,7 @@ class InstallerService(GObject.GObject):
 
     def get_all_local_packages(self, loop, result, collect_type=None):
         try:
-            self._internal_load_cache(True, False, False, collect_type)
+            self._internal_load_cache(True, False, collect_type)
             result.append(self.cache.get_local_packages(collect_type))
         except Exception:
             result.append([])
@@ -224,8 +217,19 @@ class InstallerService(GObject.GObject):
 
     def get_all_remote_packages(self, loop, result, collect_type=None):
         try:
-            self._internal_load_cache(True, False, False, collect_type)
+            self._internal_load_cache(True, False, collect_type)
             result.append(self.cache.get_remote_packages(collect_type))
+        except Exception:
+            result.append([])
+            e = sys.exc_info()[1]
+            print(str(e))
+        time.sleep(0.1)
+        loop.quit()
+
+    def get_all_packages(self, loop, result, collect_type=None):
+        try:
+            self._internal_load_cache(True, False, collect_type)
+            result.append(self.cache.get_all_packages(collect_type))
         except Exception:
             result.append([])
             e = sys.exc_info()[1]
@@ -235,7 +239,7 @@ class InstallerService(GObject.GObject):
 
     def get_package_info(self, loop, result, pkg_id, collect_type):
         try:
-            self._internal_load_cache(True, False, False, collect_type)
+            self._internal_load_cache(True, False, collect_type)
             result.append(self.cache.get_package_info(pkg_id, collect_type))
         except Exception:
             result.append([])
@@ -262,13 +266,12 @@ class InstallerService(GObject.GObject):
         self.EmitRole(_("Preparing to install..."))
         self.EmitIcon("cinnamon-installer-search")
         pkg_list = {}
-        self._internal_load_cache(True, False, False, collect_type)
+        self._internal_load_cache(True, False, collect_type)
         if collect_type and collect_type in self.validTypes:
             self.collection_type = collect_type
             for uuid in packages:
                 pkg = self.cache.get_package_info(uuid, collect_type)
                 if pkg is not None:
-                    print("load packages")
                     pkg_list[uuid] = pkg
         else:
             self.collection_type = None
@@ -283,7 +286,6 @@ class InstallerService(GObject.GObject):
             self.packages_action["install"] = pkg_list
             info_config = { "title": "", "description": "", "dependencies": {} }
             self.EmitStatus("status-waiting", _("Waiting..."))
-            print("waiting")
             self.EmitTransactionConfirmation(info_config)
             #we ar waiting for a commit
         else:
@@ -295,7 +297,7 @@ class InstallerService(GObject.GObject):
         self.EmitRole(_("Preparing to remove..."))
         self.EmitIcon("cinnamon-installer-search")
         pkg_list = {}
-        self._internal_load_cache(True, False, False, collect_type)
+        self._internal_load_cache(True, False, collect_type)
         if collect_type and collect_type in self.validTypes:
             self.collection_type = collect_type
             for uuid in packages:
@@ -325,25 +327,29 @@ class InstallerService(GObject.GObject):
         self.EmitTransactionStart("start")
         self.EmitRole(_("Preparing to do a complex transaction..."))
         self.EmitIcon("cinnamon-installer-search")
-        pkg_list = {}
-        self._internal_load_cache(True, False, False, collect_type)
+        self._internal_load_cache(True, False, collect_type)
         if collect_type and collect_type in self.validTypes:
             self.collection_type = collect_type
-            for uuid in packages:
-                pkg = self.cache.get_package_info(uuid, collect_type)
-                if pkg is not None:
-                    pkg_list[uuid] = pkg
-        else:
-            self.collection_type = None
-            for uuid in packages:
-                for collect_type in self.validTypes:
+            for action in packages_status:
+                pkg_list = {}
+                for uuid in packages_status[action]:
                     pkg = self.cache.get_package_info(uuid, collect_type)
                     if pkg is not None:
                         pkg_list[uuid] = pkg
-                        break # Now the first match, but we can emit a singal EmitConflictFile or other new later.
-        total_count = len(pkg_list)
+                self.packages_action[action] = pkg_list
+        else:
+            self.collection_type = None
+            for action in packages_status:
+                pkg_list = {}
+                for uuid in packages_status[action]:
+                    for collect_type in self.validTypes:
+                        pkg = self.cache.get_package_info(uuid, collect_type)
+                        if pkg is not None:
+                            pkg_list[uuid] = pkg
+                            break # Now the first match, but we can emit a singal EmitConflictFile or other new later.
+                self.packages_action[action] = pkg_list
+        total_count = len(self.packages_action.keys())
         if total_count > 0:
-            self.packages_action["remove"] = pkg_list
             info_config = { "title": "", "description": "", "dependencies": {} }
             self.EmitStatus("status-waiting", _("Waiting..."))
             self.EmitTransactionConfirmation(info_config)
@@ -369,8 +375,10 @@ class InstallerService(GObject.GObject):
                         elif "remove" in actions:
                             self._uninstall_all(packages["remove"])
                     else:
-                        self._commit_all(packages)
-                    self._internal_load_cache(False, True, False, collect_type)
+                        error = _("The transaction can not be performed, a complex action is not implemented yet.\n\nSorry.")
+                        self.EmitTransactionError(error, "")
+                        #self._commit_all(packages)
+                    #self._internal_load_cache(False, True, collect_type)
                 else:
                     raise Exception(_("Nothing to do..."))
             except Exception:
@@ -394,7 +402,6 @@ class InstallerService(GObject.GObject):
 
     def _on_cancel_finished(self):
         self._signals = []
-        print("bye")
         self.current_trans = None
 
     def resolve_config_file_conflict(replace, old, new):
@@ -418,10 +425,8 @@ class InstallerService(GObject.GObject):
     def release_all(self):
         pass
 
-    def get_image_from_collection(self, collect_type):
-        if collect_type:
-            return "cs-%ss" % collect_type
-        return ""
+    def get_default_icon(self, collect_type):
+        return self.cache.get_default_icon(collect_type)
 
     def refresh_cache(self, force_update=False, collect_type=None):
         url_list = {}
@@ -435,7 +440,7 @@ class InstallerService(GObject.GObject):
                 "path":cache_file,
                 "force-update":force_update
             }
-            self.EmitDownloadPercentChild(collect_type, self.get_image_from_collection(collect_type), "%s index" % collect_type, 0, "")
+            self.EmitDownloadPercentChild(collect_type, self.get_default_icon(collect_type), "%s index" % collect_type, 0, "")
         else:
             for collect_type in self.validTypes:
                 self.EmitRole(_("Refreshing index."))
@@ -446,7 +451,7 @@ class InstallerService(GObject.GObject):
                     "path":cache_file,
                     "force-update":force_update
                 }
-                self.EmitDownloadPercentChild(collect_type, self.get_image_from_collection(collect_type), "%s index" % collect_type, 0, "")
+                self.EmitDownloadPercentChild(collect_type, self.get_default_icon(collect_type), "%s index" % collect_type, 0, "")
         self.EmitIcon("cinnamon-installer-download")
         self.EmitTransactionCancellable(True)
         self.EmitStatus("status-downloading", _("Downloading index for %ss" % collect_type))
@@ -474,7 +479,7 @@ class InstallerService(GObject.GObject):
         force_update = url_list[url]["force-update"]
 
         percent = int((float(count*block_size)/total_size)*100)
-        self.EmitDownloadPercentChild(collect_type, self.get_image_from_collection(collect_type), "%ss index" % collect_type, percent, "")
+        self.EmitDownloadPercentChild(collect_type, self.get_default_icon(collect_type), "%ss index" % collect_type, percent, "")
         count = float(total_count - pending_downloads)
         if (force_update):
             total_percent = 4*(100*count + percent)/(total_count*5)
@@ -530,7 +535,7 @@ class InstallerService(GObject.GObject):
         last_edited = url_list[url]["last-edited"]
         percent = int((float(count*block_size)/total_size)*100)
         time = datetime.datetime.fromtimestamp(last_edited).strftime("%Y-%m-%d -- %H:%M:%S")
-        self.EmitDownloadPercentChild(uuid, self.get_image_from_collection(collect_type), name, percent, time)
+        self.EmitDownloadPercentChild(uuid, self.get_default_icon(collect_type), name, percent, time)
         count = float(total_count - pending_downloads)
         total_percent = 80 + (100*count + percent)/(total_count*5)
         self.EmitPercent(total_percent)
@@ -567,7 +572,11 @@ class InstallerService(GObject.GObject):
                         uuid = url_list[url]["uuid"]
                         if not collect_type in pkg_list:
                             pkg_list[collect_type] = {}
-                        pkg_list[collect_type][uuid] = { "path": works[url]["result"], "last-edited": url_list[url]["last-edited"] }
+                        pkg_list[collect_type][uuid] = { 
+                            "name": url_list[url]["name"],
+                            "path": works[url]["result"],
+                            "last-edited": url_list[url]["last-edited"] 
+                        }
         return pkg_list
 
     def _reporthook_packages(self, url, count, block_size, total_size, pending_downloads, url_list):
@@ -578,7 +587,7 @@ class InstallerService(GObject.GObject):
         last_edited = url_list[url]["last-edited"]
         percent = int((float(count*block_size)/total_size)*100)
         time = datetime.datetime.fromtimestamp(last_edited).strftime("%Y-%m-%d -- %H:%M:%S")
-        self.EmitDownloadPercentChild(uuid, self.get_image_from_collection(collect_type), name, percent, time)
+        self.EmitDownloadPercentChild(uuid, self.get_default_icon(collect_type), name, percent, time)
         count = float(total_count - pending_downloads)
         total_percent = 9*(100*count + percent)/(total_count*10)
         self.EmitPercent(total_percent)
@@ -598,7 +607,8 @@ class InstallerService(GObject.GObject):
                 for uuid in pkg_list[collect_type]:
                     file_path = pkg_list[collect_type][uuid]["path"]
                     edited_date = pkg_list[collect_type][uuid]["last-edited"]
-                    schema_filename = self._install_single(uuid, file_path, edited_date, compressor, collect_type)
+                    name = pkg_list[collect_type][uuid]["name"]
+                    schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
                     schema_filename_list["install"][uuid] = schema_filename
             self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
@@ -643,7 +653,8 @@ class InstallerService(GObject.GObject):
                 for uuid in pkg_list[collect_type]:
                     file_path = pkg_list[collect_type][uuid]["schema-file"]
                     edited_date = pkg_list[collect_type][uuid]["last-edited"]
-                    self._install_single(uuid, file_path, edited_date, compressor, collect_type)
+                    name = pkg_list[collect_type][uuid]["name"]
+                    self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
             self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
             #self._install_and_remove_schema_files(arr_collect)
@@ -653,7 +664,7 @@ class InstallerService(GObject.GObject):
             self.EmitTransactionDone("complete")
         self.abort_download = False
 
-    def _install_single(self, uuid, file_path, edited_date, compressor, collect_type):
+    def _install_single(self, uuid, name, file_path, edited_date, compressor, collect_type):
         error_title = uuid
         schema_filename = ""
         try:
@@ -661,10 +672,9 @@ class InstallerService(GObject.GObject):
             compressor.set_collection(collect_type)
             compressor.extract_file(file_path, folder_path)
             if collect_type == "theme":
-                dest = self.cache.get_install_folder(collect_type)
                 # Check dir name - it may or may not be the same as the theme name from our spices data
                 # Regardless, this will end up being the installed theme name, whether it matched or not
-                temp_path = os.path.join(folder_path, title)
+                temp_path = os.path.join(folder_path, name)
                 if not os.path.exists(temp_path):
                     title = os.listdir(folder_path)[0] # We assume only a single folder, the theme name
                     temp_path = os.path.join(folder_path, title)
@@ -675,12 +685,10 @@ class InstallerService(GObject.GObject):
                 md = {}
                 md["last-edited"] = edited_date
                 md["uuid"] = uuid
-                raw_meta = json.dumps(md, indent=4)
-                final_path = os.path.join(dest, title)
                 metadata_file = os.path.join(temp_path, "cinnamon", "metadata.json")
+                final_path = os.path.join(self.cache.get_install_folder(collect_type), title)
             else:
                 error_title = uuid
-                dest = os.path.join(self.cache.get_install_folder(collect_type), uuid)
                 members = compressor.get_members()
                 for file in members:
                     file_locate = os.path.join(folder_path, file.filename)
@@ -701,21 +709,22 @@ class InstallerService(GObject.GObject):
                     elif "gschema.xml" in file.filename:
                         pkg_list[collect_type][uuid]["schema-file"] = os.path.join(folder_path, file.filename)
                         schema_filename = file.filename
-            file = open(os.path.join(folder_path, "metadata.json"), "r")
-            raw_meta = file.read()
-            file.close()
-            md = json.loads(raw_meta)
-            md["last-edited"] = edited_date
-            if schema_filename != "":
-                md["schema-file"] = schema_filename
+                # Test for correct folder structure
+                file = open(os.path.join(folder_path, "metadata.json"), "r")
+                raw_meta = file.read()
+                file.close()
+                md = json.loads(raw_meta)
+                md["last-edited"] = edited_date
+                if schema_filename != "":
+                    md["schema-file"] = schema_filename
+                metadata_file = os.path.join(folder_path, "metadata.json")
+                final_path = os.path.join(self.cache.get_install_folder(collect_type), uuid)
             raw_meta = json.dumps(md, indent=4)
-            final_path = dest
-            metadata_file = os.path.join(folder_path, "metadata.json")
             file = open(metadata_file, "w+")
             file.write(raw_meta)
+            file.close()
             SystemTools.set_propietary_id(metadata_file, EFECTIVE_IDS[0], EFECTIVE_IDS[1])
             SystemTools.set_mode(metadata_file, EFECTIVE_MODE)
-            file.close()
             self.EmitStatus("status-cleaning-up", _("Cleaning up..."))
             self.EmitIcon("cinnamon-installer-cleanup")
             if os.path.exists(final_path):

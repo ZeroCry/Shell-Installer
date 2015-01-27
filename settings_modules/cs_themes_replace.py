@@ -179,15 +179,14 @@ class ThemesViewSidePage (ExtensionSidePage):
             inc = 1.0 / theme_len 
         if path_suffix == "icons":            
             for theme in themes:
-                if theme == "default":
-                    theme = Gtk.Settings.get_default().get_property('gtk-icon-theme-name')
                 icon_theme = Gtk.IconTheme()
-                icon_theme.set_custom_theme(theme)
+                if theme != "default":
+                    icon_theme.set_custom_theme(theme)
                 folder = icon_theme.lookup_icon("folder", ICON_SIZE, Gtk.IconLookupFlags.FORCE_SVG)
                 if folder:
-                    path = folder.get_filename()
-                    chooser.add_picture(path, callback, title=theme, id=theme)
-                GObject.timeout_add(5, self.increment_progress, (chooser,inc)) 
+                     path = folder.get_filename()
+                     chooser.add_picture(path, callback, title=theme, id=theme)
+                     GObject.timeout_add(5, self.increment_progress, (chooser,inc)) 
         else:
             if path_suffix == "cinnamon":
                 chooser.add_picture("/usr/share/cinnamon/theme/thumbnail.png", callback, title="cinnamon", id="cinnamon") 
@@ -278,7 +277,9 @@ class ThemesViewSidePage (ExtensionSidePage):
 
     def _on_icon_theme_selected(self, path, theme):
         try:
-            self.if_settings.set_string("icon-theme", theme)
+            if theme == "default": theme_name = self.if_settings.get_default_value("icon-theme").get_string()
+            else: theme_name = theme
+            self.if_settings.set_string("icon-theme", theme_name)
             self.icon_chooser.set_button_label(theme)
             self.icon_chooser.set_tooltip_text(theme)
         except Exception:
@@ -334,8 +335,6 @@ class ThemesViewSidePage (ExtensionSidePage):
         sortArr(valid)
         res = []
         for i in valid:
-            if i[0] == "default":
-                i[0] = Gtk.Settings.get_default().get_property('gtk-icon-theme-name')
             res.append((i[0], i[1]))
         return res
     

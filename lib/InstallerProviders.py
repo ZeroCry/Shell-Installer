@@ -478,7 +478,10 @@ class Installer():
     def _transaction_done_wrapper(self, service, msg):
         if self.handled_id > 0:
             self.trans.disconnect(self.handled_id)
-            self.signal_handles[self.handled_id](service, msg)
+            if msg == "restart":
+                self.signal_handles[self.handled_id](service, True)
+            else:
+                self.signal_handles[self.handled_id](service, False)
             del self.signal_handles[self.handled_id]
         self.handled_id = 0
 

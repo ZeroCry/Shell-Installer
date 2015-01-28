@@ -120,13 +120,71 @@ def compilePy(folderModules, installed_path):
             tragetFile = os.path.join(traget, filename)
             py_compile.compile(tragetFile)
 
-def installPolicy(installed_path):
-    traget = os.path.join(installed_path, "config/policy")
-    source = os.listdir(traget)
-    for filename in source:
-        srcFile = os.path.join(traget, filename)
-        outFile = os.path.join(POLKIT_PATH, filename)
-        shutil.copyfile(srcFile, outFile)
+def generatePolicy(installed_path, locale):
+    tragetFile = os.path.join(POLKIT_PATH, "org.cinnamon.installer.policy")
+    desktopFile = open(tragetFile, "w")
+    desktopFile.writelines('<?xml version="1.0" encoding="utf-8"?>\n')
+    desktopFile.writelines('<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">\n')
+    desktopFile.writelines('<policyconfig>\n')
+    desktopFile.writelines('    <vendor>lestcape</vendor>\n')
+    desktopFile.writelines('    <vendor_url>https://github.com/lestcape/Cinnamon-Installer/</vendor_url>\n')
+    desktopFile.writelines('    <icon_name>package-x-generic</icon_name>\n')
+    desktopFile.writelines('    <action id="org.freedesktop.policykit.pkexec.run-cinnamon.installer">\n')
+    desktopFile.writelines('        <message>Authentication is required</message>\n')
+    for directory in os.listdir(locale):
+        if os.path.isdir(os.path.join(locale, directory)):
+            try:
+                language = gettext.translation("cinnamon-installer", locale, languages=[directory])
+                language.install()
+                desktopFile.writelines('        <message xml:lang="%s">%s</message>\n' % (directory, _("Authentication is required")))
+            except:
+                pass
+    desktopFile.writelines('        <defaults>\n')
+    desktopFile.writelines('              <allow_any>auth_admin</allow_any>\n')
+    desktopFile.writelines('              <allow_inactive>auth_admin</allow_inactive>\n')
+    desktopFile.writelines('              <allow_active>auth_admin</allow_active>\n')
+    desktopFile.writelines('        </defaults>\n')
+    desktopFile.writelines('        <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/cinnamon-installer/cinnamon-installer.py</annotate>\n')
+    desktopFile.writelines('        <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>\n')
+    desktopFile.writelines('    </action>\n')
+    desktopFile.writelines('    <action id="org.freedesktop.policykit.pkexec.run-schema.installer">\n')
+    desktopFile.writelines('        <message>Authentication is required to install or remove a schema files</message>\n')
+    gettext.install("cinnamon", "/usr/share/locale")
+    for directory in os.listdir(locale):
+        if os.path.isdir(os.path.join(locale, directory)):
+            try:
+                language = gettext.translation("cinnamon-installer", locale, languages=[directory])
+                language.install()
+                desktopFile.writelines('        <message xml:lang="%s">%s</message>\n' % (directory, _("Authentication is required to install or remove a schema files")))
+            except:
+                pass
+    desktopFile.writelines('        <defaults>\n')
+    desktopFile.writelines('              <allow_any>auth_admin</allow_any>\n')
+    desktopFile.writelines('              <allow_inactive>auth_admin</allow_inactive>\n')
+    desktopFile.writelines('              <allow_active>auth_admin</allow_active>\n')
+    desktopFile.writelines('        </defaults>\n')
+    desktopFile.writelines('        <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/cinnamon-installer/tools/schema-installer.py</annotate>\n')
+    desktopFile.writelines('        <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>\n')
+    desktopFile.writelines('    </action>\n')
+    desktopFile.writelines('    <action id="org.cinnamon.installer.commit">\n')
+    desktopFile.writelines('        <message>Authentication is required</message>\n')
+    for directory in os.listdir(locale):
+        if os.path.isdir(os.path.join(locale, directory)):
+            try:
+                language = gettext.translation("cinnamon-installer", locale, languages=[directory])
+                language.install()
+                desktopFile.writelines('        <message xml:lang="%s">%s</message>\n' % (directory, _("Authentication is required")))
+            except:
+                pass
+    desktopFile.writelines('        <defaults>\n')
+    desktopFile.writelines('              <allow_any>no</allow_any>\n')
+    desktopFile.writelines('              <allow_inactive>no</allow_inactive>\n')
+    desktopFile.writelines('              <allow_active>auth_admin</allow_active>\n')
+    desktopFile.writelines('        </defaults>\n')
+    desktopFile.writelines('    </action>\n')
+    desktopFile.writelines('</policyconfig>\n')
+    st = os.stat(tragetFile)
+    os.chmod(tragetFile, st.st_mode | stat.S_IRWXU | stat.S_IRWXG | stat.S_IROTH | stat.S_IXOTH | stat.S_IEXEC)
 
 def installSchema(installed_path):
     traget = os.path.join(installed_path, "config/schemas")
@@ -176,7 +234,8 @@ def createIcons(dest_path, installed_path):
 def generateDesktop(dest_path, installed_path, locale):
     menuName = "Cinnamon Installer"
     menuComment = "Install packages, applets, desklets, extensions and themes."
-    desktopFile = open(os.path.join(dest_path, "cinnamon-installer.desktop"), "w")
+    tragetFile = os.path.join(dest_path, "cinnamon-installer.desktop")
+    desktopFile = open(tragetFile, "w")
     desktopFile.writelines("[Desktop Entry]\n")
     desktopFile.writelines("Name=Cinnamon Installer\n")
     gettext.install("cinnamon", "/usr/share/locale")
@@ -205,7 +264,6 @@ def generateDesktop(dest_path, installed_path, locale):
     desktopFile.writelines("OnlyShowIn=X-Cinnamon;\n")
     desktopFile.writelines("Categories=GNOME;GTK;Settings;DesktopSettings;\n")
     desktopFile.writelines("StartupNotify=false\n")
-    tragetFile = os.path.join(dest_path, "cinnamon-installer.desktop")
     st = os.stat(tragetFile)
     os.chmod(tragetFile, st.st_mode | stat.S_IRWXU | stat.S_IRWXG | stat.S_IROTH | stat.S_IXOTH | stat.S_IEXEC)
 
@@ -331,7 +389,7 @@ def install():
     createIcons("/usr/share/pixmaps", INSTALL_PATH)
     generateInitFile("/usr/bin", INSTALL_PATH)
     generateDesktop("/usr/share/applications", INSTALL_PATH, LOCALE_PATH)
-    installPolicy(INSTALL_PATH)
+    generatePolicy(INSTALL_PATH, LOCALE_PATH)
     installSchema(INSTALL_PATH)
     installCronD(INSTALL_PATH)
     removeInstaller(LOCAL_PATH)

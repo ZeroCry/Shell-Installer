@@ -369,15 +369,15 @@ class InstallerService(GObject.GObject):
             try:
                 self.EmitStatus("status-committing", _("Committing"))
                 if len(actions) > 0:
-                    if len(actions) == 1:
+                    if (len(actions) == 1) and (("install" in actions) or ("remove" in actions)):
                         if "install" in actions:
                             self._install_all(packages["install"])
                         elif "remove" in actions:
                             self._uninstall_all(packages["remove"])
                     else:
-                        error = _("The transaction can not be performed, a complex action is not implemented yet.\n\nSorry.")
-                        self.EmitTransactionError(error, "")
-                        #self._commit_all(packages)
+                        #error = _("The transaction can not be performed, a complex action is not implemented yet.\n\nSorry.")
+                        #self.EmitTransactionError(error, "")
+                        self._commit_all(packages)
                     #self._internal_load_cache(False, True, collect_type)
                 else:
                     raise Exception(_("Nothing to do..."))
@@ -563,7 +563,8 @@ class InstallerService(GObject.GObject):
 
             works = self.download_helper.download_files(url_list, False, self._reporthook_packages, url_list)
  
-            if not self.download_helper.is_download_cancelled():
+            self.abort_download = self.download_helper.is_download_cancelled()
+            if not self.abort_download:
                 for url in works:
                     if works[url]["error"]:
                         self.EmitLogError(works[url]["error"])
@@ -595,34 +596,39 @@ class InstallerService(GObject.GObject):
         self.EmitTarget(targent)
 
     def _install_all(self, pkg_install):
-        self.EmitRole(_("Installing..."))
-        pkg_list = self._download_packages(pkg_install)
-        total_count = len(pkg_list)
-        if total_count > 0:
-            schema_filename_list = { "install": {}, "remove": {} }
-            self.EmitStatus("status-running", _("Installing..."))
-            self.EmitIcon("cinnamon-installer-install")
-            compressor = UtilitiesTools.CompressorHelper()
-            for collect_type in pkg_list:
-                for uuid in pkg_list[collect_type]:
-                    file_path = pkg_list[collect_type][uuid]["path"]
-                    edited_date = pkg_list[collect_type][uuid]["last-edited"]
-                    name = pkg_list[collect_type][uuid]["name"]
-                    schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
-                    schema_filename_list["install"][uuid] = [schema_filename, collect_type]
-            self._install_and_remove_schema_files(schema_filename_list)
-            self.EmitStatus("status-finished", _("Transaction sucefully.."))
-            self.EmitTransactionDone("Finished")
-            need_restart = False
+        if len(pkg_install) > 0:
+            self.EmitRole(_("Installing..."))
+            pkg_list = self._download_packages(pkg_install)
+            if len(pkg_list) > 0 and not self.abort_download:
+                schema_filename_list = { "install": {}, "remove": {} }
+                self.EmitStatus("status-running", _("Installing..."))
+                self.EmitIcon("cinnamon-installer-install")
+                compressor = UtilitiesTools.CompressorHelper()
+                for collect_type in pkg_list:
+                    for uuid in pkg_list[collect_type]:
+                        file_path = pkg_list[collect_type][uuid]["path"]
+                        edited_date = pkg_list[collect_type][uuid]["last-edited"]
+                        name = pkg_list[collect_type][uuid]["name"]
+                        schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
+                        if schema_filename:
+                            schema_filename_list["install"][uuid] = [schema_filename, collect_type]
+                self._install_and_remove_schema_files(schema_filename_list)
+                self.EmitStatus("status-finished", _("Transaction sucefully.."))
+                self.EmitTransactionDone("Finished")
+            elif self.abort_download:
+                self.EmitTransactionError(_("Download aborted."), "")
+                self.EmitTransactionDone("Download Fail")
+            else:
+                self.EmitStatus("status-finished", _("We don't find any packages to install"))
+                self.EmitTransactionDone("complete")
         else:
             self.EmitStatus("status-finished", _("We don't find any packages to install"))
             self.EmitTransactionDone("complete")
         self.abort_download = False
 
     def _uninstall_all(self, pkg_remove):
-        self.EmitRole(_("Removing..."))
-        total_count = len(pkg_remove)
-        if total_count > 0:
+        if len(pkg_remove) > 0:
+            self.EmitRole(_("Removing..."))
             schema_filename_list = { "install": {}, "remove": {} }
             self.EmitStatus("status-running", _("Removing..."))
             self.EmitIcon("cinnamon-installer-delete")
@@ -635,37 +641,56 @@ class InstallerService(GObject.GObject):
             self._install_and_remove_schema_files(schema_filename_list)
             self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
-            need_restart = False
         else:
             self.EmitStatus("status-finished", _("We don't find any packages to install"))
             self.EmitTransactionDone("complete")
         self.abort_download = False
 
     def _commit_all(self, pkg_status):
-        self.EmitRole(_("Installing..."))
-        pkg_list = self._download_packages(pkg_install)
-        total_count = len(pkg_list)
-        if total_count > 0:
-            schema_filename_list = { "install": {}, "remove": {} }
-            self.EmitStatus("status-running", _("Installing..."))
-            self.EmitIcon("cinnamon-installer-install")
-            compressor = UtilitiesTools.CompressorHelper()
-            for collect_type in pkg_list:
-                for uuid in pkg_list[collect_type]:
-                    file_path = pkg_list[collect_type][uuid]["path"]
-                    edited_date = pkg_list[collect_type][uuid]["last-edited"]
-                    name = pkg_list[collect_type][uuid]["name"]
-                    schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
-                    schema_filename_list["install"][uuid] = [schema_filename, collect_type]
-            self._install_and_remove_schema_files(schema_filename_list)
-            self.EmitStatus("status-finished", _("Transaction sucefully.."))
-            self.EmitTransactionDone("Finished")
-            need_restart = False
+        pkg_install = {}
+        if "install" in pkg_status: self._merge_dict(pkg_install, pkg_status["install"]) 
+        if "reinstall" in pkg_status: self._merge_dict(pkg_install, pkg_status["reinstall"])
+        if "update" in pkg_status: self._merge_dict(pkg_install, pkg_status["update"])
+        if "remove" in pkg_status: pkg_remove = pkg_status["remove"]
+        else: pkg_remove = {}
+        if len(pkg_install.keys()) > 0:
+            self.EmitRole(_("Installing..."))
+            pkg_list = self._download_packages(pkg_install)
         else:
-            self.EmitStatus("status-finished", _("We don't find any packages to install"))
+            pkg_list = []
+
+        if len(pkg_list) + len(pkg_remove) > 0 and not self.abort_download:
+            schema_filename_list = { "install": {}, "remove": {} }
+            if len(pkg_list) > 0:
+                self.EmitStatus("status-running", _("Commiting..."))
+                self.EmitIcon("cinnamon-installer-install")
+                compressor = UtilitiesTools.CompressorHelper()
+                for collect_type in pkg_list:
+                    for uuid in pkg_list[collect_type]:
+                        file_path = pkg_list[collect_type][uuid]["path"]
+                        edited_date = pkg_list[collect_type][uuid]["last-edited"]
+                        name = pkg_list[collect_type][uuid]["name"]
+                        schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
+                        if schema_filename:
+                            schema_filename_list["install"][uuid] = [schema_filename, collect_type]
+            if len(pkg_remove.keys()) > 0:
+                self.EmitRole(_("Removing..."))
+                for uuid in pkg_remove:
+                    collect_type = pkg_remove[uuid]["collection"]
+                    if pkg_remove[uuid]["schema-file"]:
+                        schema_filename_list["remove"][uuid] = [pkg_remove[uuid]["schema-file"], collect_type]
+                    edited_date = pkg_remove[uuid]["last-edited"]
+                    self._uninstall_single(uuid, edited_date, collect_type)
+            self._install_and_remove_schema_files(schema_filename_list)
+            self.EmitStatus("status-finished", _("Transaction sucefully..."))
+            self.EmitTransactionDone("Finished")
+        elif self.abort_download:
+            self.EmitTransactionError(_("Download aborted."), "")
+            self.EmitTransactionDone("Download Fail")
+        else:
+            self.EmitStatus("status-finished", _("We don't find any packages to commit"))
             self.EmitTransactionDone("complete")
         self.abort_download = False
-
 
     def _install_single(self, uuid, name, file_path, edited_date, compressor, collect_type):
         error_title = uuid
@@ -837,6 +862,10 @@ class InstallerService(GObject.GObject):
             return False
         return True
 
+    def _merge_dict(self, dictOut, dictIn):
+        for key in dictIn:
+            dictOut[key] = dictIn[key]
+
     def _is_program_in_system(self, programName):
         path = os.getenv("PATH")
         for p in path.split(os.path.pathsep):
@@ -886,7 +915,6 @@ class InstallerService(GObject.GObject):
         self.emit("EmitAvailableUpdates", syncfirst, updates)
 
     def EmitTransactionStart(self, message):
-        self.abort_download = True
         self.lock_trans.acquire()
         self.emit("EmitTransactionStart", message)
 
@@ -896,7 +924,6 @@ class InstallerService(GObject.GObject):
         self.collection_type = None
 
     def EmitTransactionError(self, title, message):
-        self.abort_download = True
         self.emit("EmitTransactionError", title, message)
         self.packages = None
         self.collection_type = None

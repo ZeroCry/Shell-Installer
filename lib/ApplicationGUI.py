@@ -113,6 +113,8 @@ class ControlWindow(object):
         self.not_close_on_finished = False
 
     def set_transaction(self, transaction):
+        self._download_map = {}
+        self.mainApp._downloadTreeView.get_model().clear()
         self.disconnect_all_signals()
         self.trans = transaction
         self.connect_all_signals()

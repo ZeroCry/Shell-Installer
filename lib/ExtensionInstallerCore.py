@@ -70,17 +70,6 @@ SETTING_TYPE_NONE = 0
 SETTING_TYPE_INTERNAL = 1
 SETTING_TYPE_EXTERNAL = 2
 
-MARK_NONE = 0
-MARK_INSTALL = 1
-MARK_REINSTALL = 2
-MARK_UPDATE = 3
-MARK_REMOVE = 4
-
-#"install",
-#"reinstall",
-#"update",
-#"remove"
-
 ROW_SIZE = 32
 
 class SurfaceWrapper:
@@ -1009,11 +998,12 @@ class ExtensionSidePage (SidePage):
         for uuid in self.install_list:
             if self.install_list[uuid] == "remove":
                 self.disable_extension(uuid, "", 0)
-            #if self.install_list[uuid] == "install":
-            #    self.disable_extension(uuid, "", 0)
+            if self.install_list[uuid] == "update" or self.install_list[uuid] == "reinstall":
+                need_restart = need_restart or (self._get_number_of_instances(uuid) > 0)
         self.load_extensions(False, True)
         if need_restart:
             self.show_info(_("Please restart Cinnamon for the changes to take effect"))
+        self.install_list = {}
 
     def enable_extension(self, uuid, name):
         if not self.themes:

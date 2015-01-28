@@ -1483,7 +1483,7 @@ Please contact the developer.""")
             try: website = pkg_info["website"]
             except KeyError: website = ""
             except ValueError: website = ""
-            try: version = pkg_info["version"]
+            try: version = str(pkg_info["version"])
             except KeyError: version = ""
             except ValueError: version = ""
             try: description = pkg_info["description"]

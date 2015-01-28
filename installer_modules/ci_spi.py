@@ -46,7 +46,7 @@ import SpicesPackages, SystemTools, UtilitiesTools
 from gi.repository import GObject
 
 ABS_PATH = os.path.abspath(__file__)
-DIR_PATH = os.path.dirname(ABS_PATH)
+DIR_PATH = os.path.dirname(os.path.dirname(ABS_PATH))
 
 # i18n
 import gettext, locale
@@ -609,10 +609,10 @@ class InstallerService(GObject.GObject):
                     edited_date = pkg_list[collect_type][uuid]["last-edited"]
                     name = pkg_list[collect_type][uuid]["name"]
                     schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
-                    schema_filename_list["install"][uuid] = schema_filename
+                    schema_filename_list["install"][uuid] = [schema_filename, collect_type]
+            self._install_and_remove_schema_files(schema_filename_list)
             self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
-            self._install_and_remove_schema_files(schema_filename_list)
             need_restart = False
         else:
             self.EmitStatus("status-finished", _("We don't find any packages to install"))
@@ -629,12 +629,12 @@ class InstallerService(GObject.GObject):
             for uuid in pkg_remove:
                 collect_type = pkg_remove[uuid]["collection"]
                 if pkg_remove[uuid]["schema-file"]:
-                    schema_filename_list["remove"][uuid] = pkg_remove[uuid]["schema-file"]
+                    schema_filename_list["remove"][uuid] = [pkg_remove[uuid]["schema-file"], collect_type]
                 edited_date = pkg_remove[uuid]["last-edited"]
                 self._uninstall_single(uuid, edited_date, collect_type)
+            self._install_and_remove_schema_files(schema_filename_list)
             self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
-            self._install_and_remove_schema_files(schema_filename_list)
             need_restart = False
         else:
             self.EmitStatus("status-finished", _("We don't find any packages to install"))
@@ -646,23 +646,26 @@ class InstallerService(GObject.GObject):
         pkg_list = self._download_packages(pkg_install)
         total_count = len(pkg_list)
         if total_count > 0:
+            schema_filename_list = { "install": {}, "remove": {} }
             self.EmitStatus("status-running", _("Installing..."))
             self.EmitIcon("cinnamon-installer-install")
-            compressor = UtilitiesTools.CompressorHelper(collect_type)
+            compressor = UtilitiesTools.CompressorHelper()
             for collect_type in pkg_list:
                 for uuid in pkg_list[collect_type]:
-                    file_path = pkg_list[collect_type][uuid]["schema-file"]
+                    file_path = pkg_list[collect_type][uuid]["path"]
                     edited_date = pkg_list[collect_type][uuid]["last-edited"]
                     name = pkg_list[collect_type][uuid]["name"]
-                    self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
+                    schema_filename = self._install_single(uuid, name, file_path, edited_date, compressor, collect_type)
+                    schema_filename_list["install"][uuid] = [schema_filename, collect_type]
+            self._install_and_remove_schema_files(schema_filename_list)
             self.EmitStatus("status-finished", _("Transaction sucefully.."))
             self.EmitTransactionDone("Finished")
-            #self._install_and_remove_schema_files(arr_collect)
             need_restart = False
         else:
             self.EmitStatus("status-finished", _("We don't find any packages to install"))
             self.EmitTransactionDone("complete")
         self.abort_download = False
+
 
     def _install_single(self, uuid, name, file_path, edited_date, compressor, collect_type):
         error_title = uuid
@@ -674,19 +677,18 @@ class InstallerService(GObject.GObject):
             if collect_type == "theme":
                 # Check dir name - it may or may not be the same as the theme name from our spices data
                 # Regardless, this will end up being the installed theme name, whether it matched or not
-                temp_path = os.path.join(folder_path, name)
-                if not os.path.exists(temp_path):
+                data_path = os.path.join(folder_path, name)
+                if not os.path.exists(data_path):
                     title = os.listdir(folder_path)[0] # We assume only a single folder, the theme name
-                    temp_path = os.path.join(folder_path, title)
-
+                    data_path = os.path.join(folder_path, title)
                 # Test for correct folder structure - look for cinnamon.css
-                file = open(os.path.join(temp_path, "cinnamon", "cinnamon.css"), "r")
+                file = open(os.path.join(data_path, "cinnamon", "cinnamon.css"), "r")
                 file.close()
                 md = {}
                 md["last-edited"] = edited_date
                 md["uuid"] = uuid
-                metadata_file = os.path.join(temp_path, "cinnamon", "metadata.json")
-                final_path = os.path.join(self.cache.get_install_folder(collect_type), title)
+                metadata_file = os.path.join(data_path, "cinnamon", "metadata.json")
+                final_path = os.path.join(self.cache.get_install_folder(collect_type), name)
             else:
                 error_title = uuid
                 members = compressor.get_members()
@@ -707,7 +709,6 @@ class InstallerService(GObject.GObject):
                             SystemTools.set_mode(mo_file, EFECTIVE_MODE)
                             #self.progresslabel.set_text(_("Installing %s...") % (title))
                     elif "gschema.xml" in file.filename:
-                        pkg_list[collect_type][uuid]["schema-file"] = os.path.join(folder_path, file.filename)
                         schema_filename = file.filename
                 # Test for correct folder structure
                 file = open(os.path.join(folder_path, "metadata.json"), "r")
@@ -718,6 +719,7 @@ class InstallerService(GObject.GObject):
                 if schema_filename != "":
                     md["schema-file"] = schema_filename
                 metadata_file = os.path.join(folder_path, "metadata.json")
+                data_path = folder_path
                 final_path = os.path.join(self.cache.get_install_folder(collect_type), uuid)
             raw_meta = json.dumps(md, indent=4)
             file = open(metadata_file, "w+")
@@ -729,7 +731,7 @@ class InstallerService(GObject.GObject):
             self.EmitIcon("cinnamon-installer-cleanup")
             if os.path.exists(final_path):
                 shutil.rmtree(final_path)
-            shutil.copytree(folder_path, final_path)
+            shutil.copytree(data_path, final_path)
             shutil.rmtree(folder_path)
             os.remove(file_path)
         except Exception:
@@ -772,57 +774,68 @@ class InstallerService(GObject.GObject):
             error = _("Problem uninstalling %s. %s. You may need to manually remove it.") % (uuid, str(e))
             self.EmitLogError(error)
 
-    def _install_and_remove_schema_files(self, schema_files):
+    def _install_and_remove_schema_files(self, schema_files, message=""):
         schema_install_list = ""
         schema_remove_list = ""
         for uuid in schema_files["install"]:
-            schema_install_list = schema_install_list + " " + schema_files["install"][uuid]
+            schema = schema_files["install"][uuid][0]
+            collect_type = schema_files["install"][uuid][1]
+            file_path = os.path.join(self.cache.get_install_folder(collect_type), uuid, schema) 
+            schema_install_list = file_path + "," + schema_install_list
+        if schema_install_list: schema_install_list = schema_install_list[:-1]
+
         for uuid in schema_files["remove"]:
-            schema_remove_list = schema_remove_list + " " + schema_files["install"][uuid]
+            schema = schema_files["remove"][uuid][0]
+            schema_remove_list = schema + "," + schema_remove_list
+        if schema_remove_list: schema_remove_list = schema_remove_list[:-1]
+
         if schema_install_list or schema_remove_list:
-            tool = os.path.join(ABS_PATH, "tools/schema-installer.py")
+            tool = os.path.join(DIR_PATH, "tools/schema-installer.py")
             launcher = ""
             if self._is_program_in_system("pkexec"):
                 launcher = "pkexec"
             elif os.path.exists("/usr/bin/gksu"):
                 launcher = "gksu"
             if os.path.exists(tool) and launcher:
+                sentence = _("Please enter your password to install and/or remove the required settings schema files.")
+                if message:
+                    messg = "<b>%s\n\n%s</b>" % (sentence, message)
+                else:
+                    messg = "<b>%s</b>" % sentence
+
                 if schema_install_list and schema_remove_list:
                     if launcher == "pkexec":
-                        os.execvp(launcher, [launcher, tool, "-i", schema_install_list, "-u", schema_remove_list])
+                        command = [launcher, tool, "-i", "'" + schema_install_list + "'", "-r", schema_remove_list]
                     elif launcher == "gksu":
-                        sentence = _("Please enter your password to install and remove the required settings schema.")
-                        launcher = launcher + " --message \"<b>%s</b>\"" % sentence
-                        target = "%s -i %s -u %s" % (tool, schema_install_list, schema_remove_list)
-                        command = "%s %s" % (launcher, target)
-                        os.system(command)
+                        command = [launcher, "--message", messg, tool + " -i ''" + schema_install_list + "'' -r ''" + schema_remove_list + "''"]
                 elif schema_install_list:
                     if launcher == "pkexec":
-                        os.execvp(launcher, [launcher, tool, "-i", schema_install_list])
+                        command = [launcher, tool, "-i", "'" + schema_install_list + "'"]
                     elif launcher == "gksu":
-                        sentence = _("Please enter your password to install the required settings schema.")
-                        launcher = launcher + " --message \"<b>%s</b>\"" % sentence
-                        target = "%s -i %s" % (tool, schema_install_list)
-                        command = "%s %s" % (launcher, target)
-                        os.system(command)
+                        command = [launcher, "--message", messg, tool + " -i ''" + schema_install_list + "''"]
                 elif schema_remove_list:
                     if launcher == "pkexec":
-                        os.execvp(launcher, [launcher, tool, "-u", schema_remove_list])
+                        command = [launcher, tool, "-r", "'" + schema_remove_list + "'"]
                     elif launcher == "gksu":
-                        sentence = _("Please enter your password to remove the required settings schema.")
-                        launcher = launcher + " --message \"<b>%s</b>\"" % sentence
-                        target = "%s -u %s" % (tool, schema_remove_list)
-                        command = "%s %s" % (launcher, target)
-                        os.system(command)
-            else:
-                uuid_install = ""
-                uuid_remove = ""
-                for uuid in schema_files["install"]:
-                    uuid_install = uuid_install + ", " + uuid
-                for uuid in schema_files["remove"]:
-                    uuid_remove = uuid_remove + ", " + uuid 
-                error = _("Could not install or remove the settings schema files for%s. You will have to perform this step yourself.") % (uuid_install + uuid_remove)
-                self.EmitLogError(error)
+                        command = [launcher, "--message", messg, tool + " -r ''" + schema_remove_list + "''"]
+                p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                out, err = p.communicate()
+                if err and err.split("\n")[0] == "GNOME_SUDO_PASS":
+                    return self._install_and_remove_schema_files(schema_files, _("Wrong password, please try again..."))
+                if out and not err:
+                    return True
+
+            uuid_install = ""
+            uuid_remove = ""
+            for uuid in schema_files["install"]:
+                uuid_install = uuid_install + ", " + uuid
+            for uuid in schema_files["remove"]:
+                uuid_remove = uuid_remove + ", " + uuid 
+            error = _("Could not install or remove the settings schema files for%s. You will have to perform this step yourself.") % (uuid_install + uuid_remove)
+            print(error)
+            self.EmitLogError(error)
+            return False
+        return True
 
     def _is_program_in_system(self, programName):
         path = os.getenv("PATH")

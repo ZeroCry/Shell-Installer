@@ -26,25 +26,20 @@
 
 import os, sys, shutil
 
-def install(pos_start, pos_end, length_arg):
-    if pos_start != -1:
-        if pos_end == -1:
-            pos_end = length_arg
-        if pos_start < pos_end:
-            for i in range(pos_start, pos_end):
-                if os.path.isfile(sys.argv[i]):
-                    shutil.copyfile(sys.argv[i], "/usr/share/glib-2.0/schemas/%s" % os.path.basename(sys.argv[i]))
-            os.system("glib-compile-schemas /usr/share/glib-2.0/schemas/")
+def install(pos):
+    files= sys.argv[pos][1:-1].split(",")
+    for file_to in files:
+         if os.path.isfile(file_to):
+             shutil.copyfile(file_to, "/usr/share/glib-2.0/schemas/%s" % os.path.basename(file_to))
+    os.system("glib-compile-schemas /usr/share/glib-2.0/schemas/")
 
-def remove(pos_start, pos_end, length_arg):
-    if pos_start != -1:
-        if pos_end == -1:
-            pos_end = length_arg
-        if pos_start < pos_end:
-            for i in range(pos_start, pos_end):
-                if os.path.isfile(sys.argv[i]):
-                    os.remove("/usr/share/glib-2.0/schemas/%s" % (sys.argv[1]))      
-            os.system("glib-compile-schemas /usr/share/glib-2.0/schemas/")
+def remove(pos):
+    files = sys.argv[pos][1:-1].split(",")
+    for file_part in files:
+        file_to = os.path.join("/usr/share/glib-2.0/schemas", os.path.basename(file_part))
+        if os.path.isfile(file_to):
+            os.remove(file_to)      
+    os.system("glib-compile-schemas /usr/share/glib-2.0/schemas/")
 
 if __name__ == "__main__":
     length_arg = len(sys.argv)
@@ -53,8 +48,11 @@ if __name__ == "__main__":
     if length_arg > 1:
         for i in range(1, len(sys.argv)):
             if sys.argv[i] == "-i":
-                pos_install = i
-            if sys.argv[i] == "-i":
-                pos_remove = i
-        install(pos_install, pos_remove, length_arg)
-        remove(pos_remove, pos_install, length_arg)
+                pos_install = i + 1
+            if sys.argv[i] == "-r":
+                pos_remove = i + 1
+    if pos_install > -1 and pos_install < length_arg:
+        install(pos_install)
+    if pos_remove > -1 and pos_remove < length_arg:
+        remove(pos_remove)
+    print("Successfully...")

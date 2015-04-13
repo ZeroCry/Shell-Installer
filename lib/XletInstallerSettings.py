@@ -23,6 +23,38 @@
 #  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
 #  USA
 
+''' CinnamonDBus
+
+signals: [{ name: "SettingsChanged",
+                inSignature:'ssss'
+              }
+ ],
+
+    updateSetting: function(uuid, instance_id, key, payload) {
+        let components = Main.settingsManager.uuids[uuid];
+        if(components != null) {
+            let instance = components[instance_id];
+            if(instance)
+                instance.remote_set(key, payload);
+        }
+     },
+
+    emitSettingsChanged: function(uuid, instance_id, key, payload) {
+        DBus.session.emit_signal('/org/Cinnamon',
+                                 'org.Cinnamon',
+                                 'SettingsChanged',
+                                 'ssss',[uuid, instance_id, key, payload]
+        );
+    },
+
+ js/ui/settings.js 
+     set_value: function(key, val) {
+        +Main.cinnamonDBusService.emitSettingsChanged(this.uuid, this.instanceId, key, JSON.stringify(this.json[key], null, 4));
+     },
+},
+
+'''
+
 from __future__ import print_function
 
 import sys
@@ -37,6 +69,7 @@ try:
     import dbus
     from SettingsInstallerWidgets import SectionBg
     from gi.repository import Gio, Gtk, GObject, GdkPixbuf
+    #from dbus.mainloop.glib import DBusGMainLoop
 except Exception:
     e = sys.exc_info()[1]
     print(str(e))
@@ -52,6 +85,7 @@ class XletSetting:
         self.parent = parent
         self.type = _type
         self.current_id = None
+        #self.activeDBus = False
         self.builder = self.parent.builder
         self.content = self.builder.get_object("content")
         self.xlet_main_box = self.builder.get_object("xlet_main_box")
@@ -96,6 +130,32 @@ class XletSetting:
         self.more_button.connect("clicked", self.on_more_button_clicked)
         self.remove_button.connect("clicked", self.on_remove_button_clicked)
         #self.back_to_list_button.clicked()
+        #self.try_update_dbus()
+
+    '''
+    def try_update_dbus(self):
+        try:
+            DBusGMainLoop(set_as_default=True)
+            session_bus = dbus.SessionBus()
+            cinnamon_dbus = session_bus.get_object("org.Cinnamon", "/org/Cinnamon")
+            cinnamon_dbus_Iface = dbus.Interface(cinnamon_dbus, "org.Cinnamon")
+            cinnamon_dbus_Iface.connect_to_signal('SettingsChanged', self.on_settings_change)
+            self.activeDBus = True
+        except Exception, e:
+            print "Cinnamon not running, falling back to python settings engine: ", e
+        for _id in self.setting_factories.keys():
+            self.setting_factories[_id].setDBusActive(self.activeDBus)
+
+    def on_settings_change(self, uuid, instance_id, key, payload):
+        if(self.uuid == uuid and self.current_id == instance_id):
+            #print ("Received signal with message: %s" % payload)
+            widgets = self.setting_factories[self.current_id].widgets
+            if(key in widgets and widgets[key] != None):
+                node = json.loads(payload.decode('utf-8'));
+                widgets[key].settings_obj.data[key] = node
+                widgets[key].on_settings_file_changed()
+
+    '''
 
     def show (self):
         self.content.show_all()
@@ -162,6 +222,7 @@ class XletSetting:
                     instance_id = instance.split(".json")[0]
                     self.applet_settings[instance_id] = js
                     self.setting_factories[instance_id] = XletSettingsWidgets.Factory("%s/%s" % (path, instance), instance_id, self.multi_instance, self.uuid)
+                    #self.setting_factories[instance_id].setDBusActive(self.activeDBus)
                 return True
             else:
                 raise Exception("Could not find any active setting files for %s %s" % (self.type, self.uuid))
